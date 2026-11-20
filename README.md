@@ -121,6 +121,20 @@ CutVideo native engine tests
 The suite also asserts that every effect id, motion curve and transition declared in the native enums is
 reachable and ends in a fully visible state, so the Kotlin and C++ implementations cannot drift apart.
 
+### JVM tests
+
+`app/src/test` runs 20 JUnit tests on the build machine (`gradle :app:testDebugUnitTest`, executed by CI
+before the APK is uploaded):
+
+* `CatalogIntegrityTest` — the effect catalogue, the shader ids and `NativeEffectIds` stay index-aligned,
+  filter matrices are well formed, every motion/transition enum value has a preset.
+* `AnimationEngineTest` — all 18 motions end fully visible and stay in range, all 10 transitions complete,
+  animation windows clamp correctly.
+* `TimelineManagerTest` — split/trim/duplicate/delete, magnetic gap closing, snapping and frame stepping.
+
+CI fails if the report is missing, if any test fails, or if fewer than 20 tests ran — a green run is proof
+the suite actually executed.
+
 ## Honest limitations
 
 * **Reverse playback** and **stabilisation** require random-access decoding / device gyro support that this

@@ -98,7 +98,9 @@ jobs:
             exit 1
           fi
           grep -h -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' "${files[@]}" \
-            | awk -F'"' '{t+=$2; s+=$4; f+=$6; e+=$8} END {printf "JVM tests: %d run, %d skipped, %d failures, %d errors\n", t, s, f, e; if (f+e > 0) exit 1}'
+            | awk -F'"' '{t+=$2; s+=$4; f+=$6; e+=$8} END {printf "JVM tests: %d run, %d skipped, %d failures, %d errors\n", t, s, f, e; if (f+e > 0 || t < 20) exit 1}'
+          echo "JVM unit tests executed with no failures (a green run means >= 20 tests ran)."
+
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
