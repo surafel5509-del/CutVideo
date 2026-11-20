@@ -117,6 +117,14 @@ dependencies {
     androidTestImplementation(libs.androidx.test.junit)
 }
 
+android {
+    // The JVM unit tests exercise pure Kotlin (catalogues, curves, timeline maths). Returning
+    // defaults keeps incidental android.* stubs (e.g. Log) from throwing in those tests.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
