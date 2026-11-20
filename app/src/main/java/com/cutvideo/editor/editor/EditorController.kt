@@ -29,6 +29,7 @@ import com.cutvideo.editor.nativebridge.NativeEngine
 import kotlin.math.abs
 import kotlin.math.sqrt
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
