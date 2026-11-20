@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cv_bg">#101014</color>
+    <color name="cv_bg_secondary">#19191F</color>
+    <color name="cv_accent">#A855F7</color>
+    <color name="cv_accent_secondary">#7C3AED</color>
+    <color name="cv_text">#FFFFFF</color>
+    <color name="cv_text_secondary">#A1A1AA</color>
+</resources>

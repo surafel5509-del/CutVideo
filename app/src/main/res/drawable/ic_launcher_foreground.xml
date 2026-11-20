@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CutVideo brand mark: a "C" cut by a blade, with a play triangle in the negative space. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M54,16a38,38 0,1 0,0 76a38,38 0,1 0,0 -76z" />
+    <path
+        android:fillColor="#A855F7"
+        android:pathData="M54,24a30,30 0,1 1,-0.1 0z"
+        android:fillAlpha="0.55" />
+    <!-- Play glyph -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M47,40.5L68,54L47,67.5z" />
+    <!-- Blade cut across the mark -->
+    <path
+        android:fillColor="#101014"
+        android:pathData="M23,60L33,52L85,52L85,64L33,64z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.9"
+        android:pathData="M23,60L33,52L40,52L30,60z" />
+</vector>

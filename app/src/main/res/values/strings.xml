@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CutVideo</string>
+    <string name="app_tagline">Pro video editing, in your pocket</string>
+
+    <!-- Export notification -->
+    <string name="export_channel_name">Video export</string>
+    <string name="export_channel_desc">Shows progress while CutVideo renders your project</string>
+    <string name="export_notification_title">Exporting project</string>
+    <string name="export_done">Export complete</string>
+    <string name="export_failed">Export failed</string>
+</resources>

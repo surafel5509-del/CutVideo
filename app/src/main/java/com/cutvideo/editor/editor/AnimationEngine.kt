@@ -1,0 +1,143 @@
+package com.cutvideo.editor.editor
+
+import com.cutvideo.editor.domain.model.AnimationFrame
+import com.cutvideo.editor.domain.model.Clip
+import com.cutvideo.editor.domain.model.ClipAnimationType
+import com.cutvideo.editor.domain.model.TransitionType
+import kotlin.math.min
+import kotlin.math.sin
+
+/**
+ * Kotlin mirror of `timeline_renderer.cpp`.
+ *
+ * The Compose preview needs the animation transform on the UI thread at 60fps, so it samples here.
+ * The export path uses the identical curves through [CutVideoGlEffect], and both are verified against
+ * the C++ implementation in `tools/native_tests.cpp`. Curves must be kept in sync with
+ * `applyAnimation()` in C++.
+ */
+object AnimationEngine {
+
+    fun sample(type: ClipAnimationType, progress: Float): AnimationFrame {
+        val t = progress.coerceIn(0f, 1f)
+        return when (type) {
+            ClipAnimationType.NONE -> AnimationFrame()
+            ClipAnimationType.FADE -> AnimationFrame(alpha = t)
+            ClipAnimationType.ZOOM_IN -> AnimationFrame(alpha = min(1f, t * 1.6f), scale = 0.62f + 0.38f * t)
+            ClipAnimationType.ZOOM_OUT -> AnimationFrame(alpha = min(1f, t * 1.6f), scale = 1.38f - 0.38f * t)
+            ClipAnimationType.SLIDE_LEFT -> AnimationFrame(alpha = min(1f, t * 2f), translateX = 1f - t)
+            ClipAnimationType.SLIDE_RIGHT -> AnimationFrame(alpha = min(1f, t * 2f), translateX = -(1f - t))
+            ClipAnimationType.SLIDE_UP -> AnimationFrame(alpha = min(1f, t * 2f), translateY = 1f - t)
+            ClipAnimationType.SLIDE_DOWN -> AnimationFrame(alpha = min(1f, t * 2f), translateY = -(1f - t))
+            ClipAnimationType.ROTATE_IN -> AnimationFrame(
+                alpha = min(1f, t * 1.8f),
+                scale = 0.78f + 0.22f * t,
+                rotationDegrees = (1f - t) * -28f
+            )
+            ClipAnimationType.BLUR_IN -> AnimationFrame(
+                alpha = min(1f, t * 1.4f),
+                blurRadiusPx = (1f - t) * 18f
+            )
+            ClipAnimationType.POP -> AnimationFrame(alpha = min(1f, t * 3f), scale = easeOutBack(t))
+            ClipAnimationType.FLICKER -> {
+                val flick = 0.55f + 0.45f * sin(t * 42f)
+                val blend = smoothstep(0.55f, 1f, t)
+                AnimationFrame(alpha = flick + (1f - flick) * blend)
+            }
+        }
+    }
+
+    fun sampleTransition(type: TransitionType, progress: Float): AnimationFrame {
+        val t = progress.coerceIn(0f, 1f)
+        return when (type) {
+            TransitionType.FADE -> AnimationFrame(alpha = t)
+            TransitionType.SLIDE_LEFT -> AnimationFrame(translateX = 1f - t)
+            TransitionType.SLIDE_UP -> AnimationFrame(translateY = 1f - t)
+            TransitionType.ZOOM -> AnimationFrame(alpha = t, scale = 0.72f + 0.28f * t)
+            TransitionType.WIPE -> AnimationFrame(wipe = t)
+            TransitionType.CIRCLE -> AnimationFrame(wipe = t)
+        }
+    }
+
+    /** Combines in/out animations and boundary transitions for a clip at [timelineUs]. */
+    fun compose(clip: Clip, timelineUs: Long): AnimationFrame {
+        var alpha = 1f
+        var scale = 1f
+        var tx = 0f
+        var ty = 0f
+        var rotation = 0f
+        var blur = 0f
+        var wipe = 1f
+
+        val local = timelineUs - clip.startUs
+
+        if (clip.animationIn.isActive && local < clip.animationIn.durationUs) {
+            val f = sample(clip.animationIn.type, progress(local, clip.animationIn.durationUs))
+            alpha *= f.alpha; scale *= f.scale
+            tx += f.translateX; ty += f.translateY
+            rotation += f.rotationDegrees; blur += f.blurRadiusPx
+        }
+
+        if (clip.animationOut.isActive) {
+            val outStart = clip.durationUs - clip.animationOut.durationUs
+            if (local > outStart) {
+                val f = sample(clip.animationOut.type, progress(clip.durationUs - local, clip.animationOut.durationUs))
+                alpha *= f.alpha; scale *= f.scale
+                tx += f.translateX; ty += f.translateY
+                rotation += f.rotationDegrees; blur += f.blurRadiusPx
+            }
+        }
+
+        clip.transitionIn?.let { spec ->
+            if (local < spec.durationUs) {
+                val f = sampleTransition(spec.type, progress(local, spec.durationUs))
+                alpha *= f.alpha; scale *= f.scale
+                tx += f.translateX; ty += f.translateY
+                wipe = min(wipe, f.wipe)
+            }
+        }
+
+        clip.transitionOut?.let { spec ->
+            val outStart = clip.durationUs - spec.durationUs
+            if (local > outStart) {
+                val f = sampleTransition(spec.type, progress(clip.durationUs - local, spec.durationUs))
+                alpha *= f.alpha; scale *= f.scale
+                tx -= f.translateX; ty -= f.translateY
+                wipe = min(wipe, f.wipe)
+            }
+        }
+
+        return AnimationFrame(
+            alpha = alpha.coerceIn(0f, 1f),
+            scale = scale,
+            translateX = tx,
+            translateY = ty,
+            rotationDegrees = rotation,
+            blurRadiusPx = blur,
+            wipe = wipe.coerceIn(0f, 1f)
+        )
+    }
+
+    /** Same as [compose] but with a clip-local time (used by the export shader). */
+    fun composeLocal(clip: Clip, localUs: Long): AnimationFrame =
+        compose(clip.copy(startUs = 0L), localUs)
+
+    /** Wipe mode hint for the native CPU mask / shader: 0 = horizontal, 1 = circular iris. */
+    fun wipeMode(transition: TransitionType?): Int =
+        if (transition == TransitionType.CIRCLE) 1 else 0
+
+    private fun progress(elapsedUs: Long, windowUs: Long): Float =
+        if (windowUs <= 0L) 1f else (elapsedUs.toFloat() / windowUs.toFloat()).coerceIn(0f, 1f)
+
+    private fun easeOutBack(p: Float): Float {
+        val c1 = 1.70158f
+        val c3 = c1 + 1f
+        val x = p - 1f
+        return 1f + c3 * x * x * x + c1 * x * x
+    }
+
+    private fun smoothstep(edge0: Float, edge1: Float, x: Float): Float {
+        if (edge1 <= edge0) return if (x < edge0) 0f else 1f
+        val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
+}
