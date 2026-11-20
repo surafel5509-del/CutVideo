@@ -84,7 +84,10 @@ app/src/main/java/com/cutvideo/editor
 
 ## Build
 
-Requirements: JDK 17, Android SDK 35, NDK `27.0.12077973`, CMake 3.22.1.
+Verified in CI (`.github/workflows/android.yml`): **assembleDebug + unit tests green**, debug APK
+produced. Toolchain: JDK 17, AGP 8.10.1, Gradle 8.11.1, Kotlin 2.2.20, KSP 2.2.20-2.0.2,
+compileSdk/targetSdk 36, minSdk 26, Media3 1.11.1, Compose BOM 2025.09.00, NDK `27.0.12077973`,
+CMake 3.22.1.
 
 ```bash
 ./gradlew :app:assembleDebug        # build the APK
@@ -93,8 +96,9 @@ Requirements: JDK 17, Android SDK 35, NDK `27.0.12077973`, CMake 3.22.1.
 ./tools/run_native_tests.sh         # host tests for the C++ engine (g++, no Android needed)
 ```
 
-The Gradle wrapper JAR is not checked in; CI uses `gradle/actions/setup-gradle` (see
-`.github/workflows/android.yml`).
+The Gradle wrapper JAR is not checked in; CI uses `gradle/actions/setup-gradle` with Gradle 8.11.1 and
+installs the SDK/NDK through `sdkmanager`. If a build fails, the workflow posts the compiler errors as a
+commit comment so they can be read without the raw job log.
 
 ### Native tests
 
