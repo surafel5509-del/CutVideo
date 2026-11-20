@@ -58,15 +58,6 @@ android {
         isCoreLibraryDesugaringEnabled = false
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += listOf(
-            "-opt-in=kotlin.RequiresOptIn",
-            "-opt-in=androidx.media3.common.util.UnstableApi",
-            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-            "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi"
-        )
-    }
 
     buildFeatures {
         compose = true
@@ -124,4 +115,18 @@ dependencies {
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.junit)
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        optIn.addAll(
+            listOf(
+                "kotlin.RequiresOptIn",
+                "androidx.media3.common.util.UnstableApi",
+                "androidx.compose.material3.ExperimentalMaterial3Api",
+                "androidx.compose.foundation.ExperimentalFoundationApi"
+            )
+        )
+    }
 }
