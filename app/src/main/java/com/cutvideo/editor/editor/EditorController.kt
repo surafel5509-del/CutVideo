@@ -461,7 +461,8 @@ class EditorController(
 
     /** Renders the cover from a real frame of the first clip at the playhead. */
     suspend fun generateCover(doc: ProjectDoc): String? {
-        val clip = doc.primaryVideoClip(_playheadUs.value) ?: doc.videoClips().firstOrNull() ?: return null
+        val clip = TimelineManager.primaryVideoClip(doc, _playheadUs.value)
+            ?: doc.videoClips().firstOrNull() ?: return null
         if (clip.uri.isBlank()) return null
         val frame: Bitmap = thumbnailStore.frame(clip.uri, clip.sourceInUs, 640) ?: return null
         return thumbnailStore.saveProjectCover(doc.id, frame)

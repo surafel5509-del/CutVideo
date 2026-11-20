@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.request.videoFrameMillis
 import com.cutvideo.editor.data.db.ExportEntity
 import com.cutvideo.editor.data.repository.ProjectSummary
 import com.cutvideo.editor.domain.model.AspectRatio

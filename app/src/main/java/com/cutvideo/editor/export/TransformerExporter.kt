@@ -6,7 +6,8 @@ import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.SpeedChangingAudioProcessor
+import androidx.media3.common.C
+import androidx.media3.common.audio.SpeedProvider
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Crop
 import androidx.media3.effect.FrameDropEffect
@@ -119,11 +120,11 @@ class TransformerExporter(
         }
 
         val sequences = ArrayList<EditedMediaItemSequence>()
-        sequences += EditedMediaItemSequence(items)
+        sequences += EditedMediaItemSequence.withAudioAndVideoFrom(items)
 
         doc.tracks.filter { it.type == TrackType.AUDIO && !it.muted }.forEach { track ->
             val audioItems = buildAudioSequence(track.clips, track.volume, settings)
-            if (audioItems.isNotEmpty()) sequences += EditedMediaItemSequence(audioItems)
+            if (audioItems.isNotEmpty()) sequences += EditedMediaItemSequence.withAudioFrom(audioItems)
         }
 
         val composition = Composition.Builder(sequences).build()
@@ -192,9 +193,6 @@ class TransformerExporter(
         )
 
         val audioProcessors = ArrayList<AudioProcessor>()
-        if (clip.speed != 1f) {
-            audioProcessors += SpeedChangingAudioProcessor(clip.speed)
-        }
         val lead = 0L
         if (!clip.muted && !GainAudioProcessor.isNoOp(clip.volume, clip.fadeInUs, clip.fadeOutUs, lead)) {
             audioProcessors += GainAudioProcessor(
@@ -210,6 +208,7 @@ class TransformerExporter(
         val builder = EditedMediaItem.Builder(mediaItemFor(clip))
             .setEffects(Effects(audioProcessors, videoEffects))
             .setFrameRate(settings.frameRate.fps)
+        if (clip.speed != 1f) builder.setSpeed(FixedSpeedProvider(clip.speed))
         if (clip.muted) builder.setRemoveAudio(true)
 
         if (clip.uri.isBlank()) warnings.add("Clip '${clip.name}' has no media and was skipped")
@@ -223,7 +222,6 @@ class TransformerExporter(
         sorted.forEach { clip ->
             val leadSilence = max(0L, clip.startUs - cursorUs)
             val processors = ArrayList<AudioProcessor>()
-            if (clip.speed != 1f) processors += SpeedChangingAudioProcessor(clip.speed)
             val gain = clip.effectiveVolume * trackVolume
             if (!GainAudioProcessor.isNoOp(gain, clip.fadeInUs, clip.fadeOutUs, leadSilence)) {
                 processors += GainAudioProcessor(
@@ -235,10 +233,11 @@ class TransformerExporter(
                     nativeEngine = nativeEngine
                 )
             }
-            items += EditedMediaItem.Builder(mediaItemFor(clip))
+            val itemBuilder = EditedMediaItem.Builder(mediaItemFor(clip))
                 .setEffects(Effects(processors, listOf()))
                 .setFrameRate(settings.frameRate.fps)
-                .build()
+            if (clip.speed != 1f) itemBuilder.setSpeed(FixedSpeedProvider(clip.speed))
+            items += itemBuilder.build()
             cursorUs = clip.endUs
         }
         return items
@@ -299,6 +298,9 @@ class TransformerExporter(
         outputFile.parentFile?.mkdirs()
         if (outputFile.exists()) outputFile.delete()
 
+        val progressHolder = ProgressHolder()
+        var progressJob: Job? = null
+
         val transformer = Transformer.Builder(context)
             .setVideoMimeType(settings.codec.mime)
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
@@ -328,9 +330,6 @@ class TransformerExporter(
             })
             .build()
         lastTransformer = transformer
-
-        val progressHolder = ProgressHolder()
-        var progressJob: Job? = null
 
         transformer.start(plan.composition, outputFile.absolutePath)
 
@@ -367,6 +366,16 @@ class TransformerExporter(
                 "The output file could not be written ($code). Check free storage space."
             else -> "Export failed ($code). $extra"
         }.trim()
+    }
+
+    /**
+     * Constant speed handed to `EditedMediaItem.Builder#setSpeed`, which adjusts both the video
+     * timestamps and the audio (with pitch correction) so the item lands on the timeline at the
+     * duration the document expects.
+     */
+    private class FixedSpeedProvider(private val speed: Float) : SpeedProvider {
+        override fun getSpeed(timeUs: Long): Float = speed
+        override fun getNextSpeedChangeTimeUs(timeUs: Long): Long = C.TIME_UNSET
     }
 
     private companion object {

@@ -164,7 +164,7 @@ private fun TrimPanel(clip: Clip?, playhead: Long, vm: EditorViewModel) {
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GhostButton("Reset trim", onClick = {
-                vm.trimStart(clip.id, clip.startUs - clip.sourceInUs / clip.speed, false)
+                vm.trimStart(clip.id, clip.startUs - (clip.sourceInUs / clip.speed).toLong(), false)
             })
             GhostButton("Duplicate", onClick = { vm.duplicateSelected() })
             GhostButton("Delete", onClick = { vm.deleteSelected() })

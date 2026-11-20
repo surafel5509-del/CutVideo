@@ -72,18 +72,22 @@ class PreviewController(
     val state: StateFlow<PreviewState> = _state.asStateFlow()
 
     val player: ExoPlayer = ExoPlayer.Builder(appContext)
-        .setVideoEffects(
-            listOf(
-                CutVideoGlEffect(
-                    clipProvider = {
-                        activeClipForLook ?: Clip(id = "placeholder", trackType = TrackType.VIDEO)
-                    },
-                    aspect = aspect,
-                    applyAnimation = false
+        .build()
+        .apply {
+            // The colour pipeline always reads the clip that is active right now, so a single effect
+            // instance covers the whole playlist.
+            setVideoEffects(
+                listOf(
+                    CutVideoGlEffect(
+                        clipProvider = {
+                            activeClipForLook ?: Clip(id = "placeholder", trackType = TrackType.VIDEO)
+                        },
+                        aspect = aspect,
+                        applyAnimation = false
+                    )
                 )
             )
-        )
-        .build()
+        }
 
     private val musicPlayer: ExoPlayer = ExoPlayer.Builder(appContext).build()
     private val overlayPlayer: ExoPlayer = ExoPlayer.Builder(appContext).build()

@@ -69,7 +69,7 @@ jobs:
               echo "### CutVideo build diagnostics"
               echo ""
               echo '```'
-              grep -nE "^(e: |FAILURE:|Execution failed|CMake Error|.*error:)" build.log | head -100
+              grep -nE -A3 "^(e: |FAILURE:|Execution failed|CMake Error|.*error:)" build.log | head -400
               echo '```'
               echo ""
               echo "<details><summary>tail</summary>"

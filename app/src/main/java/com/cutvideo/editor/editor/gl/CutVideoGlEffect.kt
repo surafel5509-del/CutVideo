@@ -53,7 +53,7 @@ private class CutVideoGlShaderProgram(
         return Size(inputWidth, inputHeight)
     }
 
-    override fun drawFrame(presentationTimeUs: Long, inputTexId: Int, outputTexId: Int) {
+    override fun drawFrame(inputTexId: Int, presentationTimeUs: Long) {
         val clip = clipProvider()
         val localUs = localTimeProvider(presentationTimeUs)
         val animation = if (applyAnimation) AnimationEngine.composeLocal(clip, localUs) else null

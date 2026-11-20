@@ -92,6 +92,7 @@ import androidx.media3.ui.PlayerView
 import com.cutvideo.editor.domain.model.Clip
 import com.cutvideo.editor.domain.model.ProjectDoc
 import com.cutvideo.editor.domain.model.TrackType
+import com.cutvideo.editor.domain.timeline.TimelineManager
 import com.cutvideo.editor.editor.AnimationEngine
 import com.cutvideo.editor.ui.components.CutVideoLogo
 import com.cutvideo.editor.ui.components.EditorTimeline
@@ -436,7 +437,7 @@ private fun PreviewStage(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
-    val activeClip = doc.primaryVideoClip(playhead)
+    val activeClip = TimelineManager.primaryVideoClip(doc, playhead)
     val animation = activeClip?.let { AnimationEngine.compose(it, playhead) }
     val alpha by animateFloatAsState(targetValue = animation?.alpha ?: 1f, label = "previewAlpha")
 
@@ -447,6 +448,8 @@ private fun PreviewStage(
         contentAlignment = Alignment.Center
     ) {
         val stageRatio = doc.aspect.ratio
+        val stageWidth = maxWidth
+        val stageHeight = maxHeight
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -474,7 +477,7 @@ private fun PreviewStage(
                 it.pip.enabled && playhead >= it.startUs && playhead < it.endUs
             }
             if (pipClip != null) {
-                val pipWidth = maxWidth * pipClip.pip.scale.coerceIn(0.15f, 0.95f)
+                val pipWidth = stageWidth * pipClip.pip.scale.coerceIn(0.15f, 0.95f)
                 PlayerSurface(
                     playerProvider = { vm.preview.overlayPlayerInstance },
                     modifier = Modifier
@@ -482,8 +485,8 @@ private fun PreviewStage(
                         .width(pipWidth)
                         .aspectRatio(doc.aspect.ratio.coerceIn(0.5f, 2.4f))
                         .graphicsLayer {
-                            translationX = pipClip.pip.offsetXFrac * maxWidth.toPx()
-                            translationY = pipClip.pip.offsetYFrac * maxHeight.toPx()
+                            translationX = pipClip.pip.offsetXFrac * stageWidth.toPx()
+                            translationY = pipClip.pip.offsetYFrac * stageHeight.toPx()
                         }
                         .clip(RoundedCornerShape(pipClip.pip.cornerRadiusDp.dp))
                         .border(
@@ -499,7 +502,7 @@ private fun PreviewStage(
                 if (playhead in textClip.startUs until textClip.endUs) {
                     val spec = textClip.text ?: return@forEach
                     val frame = AnimationEngine.compose(textClip, playhead)
-                    val minSidePx = with(density) { min(maxWidth.toPx(), maxHeight.toPx()) }
+                    val minSidePx = with(density) { min(stageWidth.toPx(), stageHeight.toPx()) }
                     val fontSizePx = spec.sizeSp * (minSidePx / 1080f)
                     val fontSize = with(density) { fontSizePx.toSp() }
                     Text(
@@ -516,10 +519,10 @@ private fun PreviewStage(
                         },
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .width(maxWidth * spec.maxWidthFrac)
+                            .width(stageWidth * spec.maxWidthFrac)
                             .graphicsLayer {
-                                translationX = (spec.xFrac - 0.5f) * maxWidth.toPx() + frame.translateX * size.width
-                                translationY = (spec.yFrac - 0.5f) * maxHeight.toPx() + frame.translateY * size.height
+                                translationX = (spec.xFrac - 0.5f) * stageWidth.toPx() + frame.translateX * size.width
+                                translationY = (spec.yFrac - 0.5f) * stageHeight.toPx() + frame.translateY * size.height
                                 scaleX = frame.scale
                                 scaleY = frame.scale
                                 rotationZ = spec.rotationDegrees + frame.rotationDegrees
@@ -717,6 +720,13 @@ private fun RenameDialog(current: String, onDismiss: () -> Unit, onConfirm: (Str
     )
 }
 
+private class MediaSourceOption(
+    val icon: ImageVector,
+    val title: String,
+    val subtitle: String,
+    val action: () -> Unit
+)
+
 @Composable
 private fun MediaSourceDialog(
     onDismiss: () -> Unit,
@@ -725,9 +735,9 @@ private fun MediaSourceDialog(
     onPickOverlay: () -> Unit
 ) {
     val options = listOf(
-        Triple(Icons.Rounded.Movie, "Videos", "Add clips to the main video track", onPickVideos),
-        Triple(Icons.Rounded.Audiotrack, "Audio", "Music, voice-over, sound effects", onPickAudio),
-        Triple(Icons.Rounded.Layers, "Overlay video", "Second video layer for picture-in-picture", onPickOverlay)
+        MediaSourceOption(Icons.Rounded.Movie, "Videos", "Add clips to the main video track", onPickVideos),
+        MediaSourceOption(Icons.Rounded.Audiotrack, "Audio", "Music, voice-over, sound effects", onPickAudio),
+        MediaSourceOption(Icons.Rounded.Layers, "Overlay video", "Second video layer for picture-in-picture", onPickOverlay)
     )
     AlertDialog(
         onDismissRequest = onDismiss,

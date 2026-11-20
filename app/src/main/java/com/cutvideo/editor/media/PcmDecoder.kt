@@ -97,7 +97,7 @@ object PcmDecoder {
                             val count = shorts.remaining()
                             val tmp = ShortArray(count)
                             shorts.get(tmp)
-                            output.addAll(tmp)
+                            tmp.forEach { output.add(it) }
                         }
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
                         codec.releaseOutputBuffer(outIndex, false)

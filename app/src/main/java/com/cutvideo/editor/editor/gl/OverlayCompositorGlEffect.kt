@@ -55,7 +55,7 @@ private class OverlayCompositorGlShaderProgram(
         return Size(inputWidth, inputHeight)
     }
 
-    override fun drawFrame(presentationTimeUs: Long, inputTexId: Int, outputTexId: Int) {
+    override fun drawFrame(inputTexId: Int, presentationTimeUs: Long) {
         // 1. Blit the (already colour-graded) frame straight through.
         program.draw(inputTexId, identity, 1f, blend = false)
 
