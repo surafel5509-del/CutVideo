@@ -85,6 +85,21 @@ jobs:
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
 
+      # Proof (in the run log) that the JVM tests were actually executed, not skipped:
+      # a missing report or any failure/error fails the job.
+      - name: Unit test summary
+        if: always()
+        run: |
+          shopt -s nullglob
+          files=(app/build/test-results/testDebugUnitTest/*.xml)
+          echo "report files: ${#files[@]}"
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No unit test reports were produced"
+            exit 1
+          fi
+          grep -h -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' "${files[@]}" \
+            | awk -F'"' '{t+=$2; s+=$4; f+=$6; e+=$8} END {printf "JVM tests: %d run, %d skipped, %d failures, %d errors\n", t, s, f, e; if (f+e > 0) exit 1}'
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
