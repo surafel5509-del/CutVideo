@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -49,7 +53,34 @@ jobs:
           tools/run_native_tests.sh
 
       - name: Assemble debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
+
+      - name: Report build diagnostics
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f build.log ]; then
+            echo "No build log captured." > comment.md
+          else
+            {
+              echo "### CutVideo build diagnostics"
+              echo ""
+              echo '```'
+              grep -nE "^(e: |FAILURE:|Execution failed|CMake Error|.*error:)" build.log | head -100
+              echo '```'
+              echo ""
+              echo "<details><summary>tail</summary>"
+              echo ""
+              echo '```'
+              tail -n 60 build.log
+              echo '```'
+              echo "</details>"
+            } > comment.md
+          fi
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@comment.md > /dev/null || true
 
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
