@@ -720,7 +720,7 @@ private fun RenameDialog(current: String, onDismiss: () -> Unit, onConfirm: (Str
     )
 }
 
-private class MediaSourceOption(
+private data class MediaSourceOption(
     val icon: ImageVector,
     val title: String,
     val subtitle: String,
