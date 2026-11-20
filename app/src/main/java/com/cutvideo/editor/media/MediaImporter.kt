@@ -144,10 +144,15 @@ class MediaImporter(
 
     /** Decodes the audio track, computes peaks natively and caches them for the timeline. */
     suspend fun ensureWaveform(assetId: String, uri: Uri): FloatArray? = withContext(Dispatchers.IO) {
-        val decoded = PcmDecoder.decode(context, uri) ?: return@withContext null
+        // Waveforms are a convenience: a decode failure (corrupt file, unsupported codec, memory
+        // pressure) must never abort the import, so every step is guarded.
+        val decoded = runCatching { PcmDecoder.decode(context, uri) }.getOrNull()
+            ?: return@withContext null
         val buckets = 320
-        val peaks = nativeEngine.waveform(decoded.samples, decoded.channels, buckets)
+        val peaks = runCatching { nativeEngine.waveform(decoded.samples, decoded.channels, buckets) }
+            .getOrNull()
             ?: fallbackWaveform(decoded.samples, decoded.channels, buckets)
+        if (peaks.isEmpty()) return@withContext null
         val file = thumbnailStore.waveformFile(assetId)
         runCatching {
             file.outputStream().use { out ->

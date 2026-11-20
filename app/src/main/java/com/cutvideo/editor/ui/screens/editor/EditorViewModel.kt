@@ -297,6 +297,35 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
     fun applyAnimationToAll(type: ClipAnimationType, isIn: Boolean) =
         editor.applyAnimationToAll(type, isIn)
 
+    // --- pro tools ---------------------------------------------------------------------------
+
+    fun copyStyle() = withSelectedClip { clip ->
+        _message.value = if (editor.copyStyle(clip.id)) "Style copied — select another clip to paste" else "Nothing to copy"
+    }
+
+    fun pasteStyle() = withSelectedClip { clip ->
+        _message.value = if (editor.pasteStyle(clip.id)) "Style pasted" else "Copy a style first"
+    }
+
+    fun applyStyleToAll() = withSelectedClip { clip ->
+        val count = editor.applyStyleToAll(clip.id)
+        _message.value = if (count > 0) "Look applied to $count clip(s)" else "No other clips to update"
+    }
+
+    fun autoEnhance() = withSelectedClip { clip ->
+        viewModelScope.launch {
+            if (editor.autoEnhance(clip.id)) _message.value = "Auto enhance applied"
+        }
+    }
+
+    fun moveToOverlay() = withSelectedClip { clip ->
+        _message.value = if (editor.moveToOverlay(clip.id)) {
+            "Clip sent to the overlay track"
+        } else {
+            "Only video clips on the main track can be sent to overlay"
+        }
+    }
+
     fun setTransition(type: TransitionType, durationUs: Long) = withSelectedClip { clip ->
         val document = doc.value ?: return@withSelectedClip
         val videoClips = document.videoClips().sortedBy { it.startUs }

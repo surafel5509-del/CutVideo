@@ -41,7 +41,12 @@ import kotlin.coroutines.resumeWithException
 import kotlin.math.max
 import kotlin.math.min
 
-class ExportException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class ExportException(
+    message: String,
+    cause: Throwable? = null,
+    /** Transformer's `errorCodeName` when this wraps a real `ExportException` from Media3. */
+    val errorCodeName: String = ""
+) : Exception(message, cause)
 
 /**
  * Builds and runs the export with Media3 Transformer.
@@ -323,7 +328,7 @@ class TransformerExporter(
                     Log.e(TAG, "export failed", exportException)
                     if (continuation.isActive) {
                         continuation.resumeWithException(
-                            ExportException(describeError(exportException), exportException)
+                            ExportException(describeError(exportException), exportException, exportException.errorCodeName)
                         )
                     }
                 }

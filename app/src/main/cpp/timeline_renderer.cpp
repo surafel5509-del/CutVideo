@@ -69,6 +69,36 @@ AnimationState applyAnimation(AnimationType type, float p, bool entering) {
             s.alpha = lerpf(flick, 1.0f, smoothstepf(0.55f, 1.0f, t));
             break;
         }
+        case AnimationType::kShake:
+            s.alpha = std::min(1.0f, t * 2.5f);
+            s.translateX = std::sin(t * 55.0f) * (1.0f - t) * 0.10f;
+            s.translateY = std::cos(t * 47.0f) * (1.0f - t) * 0.06f;
+            break;
+        case AnimationType::kWobble:
+            s.alpha = std::min(1.0f, t * 1.8f);
+            s.scale = 0.90f + 0.10f * t;
+            s.rotationDegrees = std::sin(t * 22.0f) * (1.0f - t) * 14.0f;
+            break;
+        case AnimationType::kBounce: {
+            const float hop = std::fabs(std::sin(t * 12.566f)) * (1.0f - t);
+            s.alpha = std::min(1.0f, t * 3.0f);
+            s.scale = 1.0f - 0.35f * (1.0f - t) + 0.18f * hop;
+            break;
+        }
+        case AnimationType::kSpinIn:
+            s.alpha = std::min(1.0f, t * 1.8f);
+            s.scale = 0.60f + 0.40f * t;
+            s.rotationDegrees = (1.0f - t) * -180.0f;
+            break;
+        case AnimationType::kFlipIn:
+            s.alpha = std::min(1.0f, t * 1.6f);
+            s.scale = std::fabs(std::cos((1.0f - t) * 1.5707964f));
+            break;
+        case AnimationType::kGlitchIn:
+            s.alpha = t;
+            s.translateX = std::sin(t * 70.0f) * (1.0f - t) * 0.05f;
+            s.blurRadiusPx = (1.0f - t) * 6.0f;
+            break;
     }
     return s;
 }
@@ -137,6 +167,20 @@ AnimationState sampleTransition(TransitionType type, float progress) {
         case TransitionType::kCircle:
             s.wipe = t;
             break;
+        case TransitionType::kSlideRight:
+            s.translateX = -(1.0f - t);
+            break;
+        case TransitionType::kSlideDown:
+            s.translateY = -(1.0f - t);
+            break;
+        case TransitionType::kGlitch:
+            s.alpha = t;
+            s.translateX = std::sin(t * 60.0f) * (1.0f - t) * 0.04f;
+            break;
+        case TransitionType::kBlur:
+            s.alpha = t;
+            s.blurRadiusPx = (1.0f - t) * 20.0f;
+            break;
     }
     return s;
 }
@@ -178,6 +222,8 @@ AnimationState composeState(const ClipDesc& clip, int64_t timelineUs) {
         state.scale *= tr.scale;
         state.translateX += tr.translateX;
         state.translateY += tr.translateY;
+        state.rotationDegrees += tr.rotationDegrees;
+        state.blurRadiusPx += tr.blurRadiusPx;
         state.wipe = std::min(state.wipe, tr.wipe);
     }
 
@@ -192,6 +238,8 @@ AnimationState composeState(const ClipDesc& clip, int64_t timelineUs) {
             state.scale *= tr.scale;
             state.translateX -= tr.translateX;
             state.translateY -= tr.translateY;
+            state.rotationDegrees -= tr.rotationDegrees;
+            state.blurRadiusPx += tr.blurRadiusPx;
             state.wipe = std::min(state.wipe, tr.wipe);
         }
     }

@@ -17,12 +17,18 @@ enum class TrackType : int32_t { kVideo = 0, kAudio = 1, kText = 2, kOverlay = 3
 
 /** Must match `ClipAnimationType` declaration order in Kotlin. */
 enum class AnimationType : int32_t {
+    // Order must match `ClipAnimationType` in Kotlin — append only.
     kNone = 0, kFade, kZoomIn, kZoomOut, kSlideLeft, kSlideRight, kSlideUp, kSlideDown,
-    kRotateIn, kBlurIn, kPop, kFlicker
+    kRotateIn, kBlurIn, kPop, kFlicker,
+    kShake, kWobble, kBounce, kSpinIn, kFlipIn, kGlitchIn
 };
 
 /** Must match `TransitionType` declaration order in Kotlin. */
-enum class TransitionType : int32_t { kFade = 0, kSlideLeft, kSlideUp, kZoom, kWipe, kCircle };
+enum class TransitionType : int32_t {
+    // Order must match `TransitionType` in Kotlin — append only.
+    kFade = 0, kSlideLeft, kSlideUp, kZoom, kWipe, kCircle,
+    kSlideRight, kSlideDown, kGlitch, kBlur
+};
 
 struct ClipDesc {
     int32_t trackType = 0;

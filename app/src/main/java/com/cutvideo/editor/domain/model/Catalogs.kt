@@ -118,6 +118,87 @@ object FilterCatalog {
             "dramatic", "Dramatic", "Cinema",
             m(1.34f, -0.10f, -0.08f, -0.040f, -0.06f, 1.30f, -0.08f, -0.040f, -0.08f, -0.08f, 1.32f, -0.040f),
             gamma = 0.90f, vignette = 0.34f, grain = 0.06f, accent = Color(0xFFDC2626)
+        ),
+        // --- second wave: the looks people reach for most on short-form video -----------------
+        FilterPreset(
+            "teal_orange", "Teal & Orange", "Cinema",
+            m(1.06f, 0.04f, -0.02f, 0.010f, 0.00f, 1.00f, 0.02f, 0.000f, -0.05f, 0.05f, 1.10f, -0.010f),
+            gamma = 0.97f, vignette = 0.20f, grain = 0.04f, accent = Color(0xFF0891B2)
+        ),
+        FilterPreset(
+            "noir", "Noir", "Mono",
+            m(0.32f, 0.62f, 0.06f, -0.030f, 0.32f, 0.62f, 0.06f, -0.030f, 0.32f, 0.62f, 0.06f, -0.030f),
+            gamma = 0.92f, vignette = 0.30f, grain = 0.08f, accent = Color(0xFFE4E4E7)
+        ),
+        FilterPreset(
+            "sepia", "Sepia", "Retro",
+            m(0.393f, 0.769f, 0.189f, 0f, 0.349f, 0.686f, 0.168f, 0f, 0.272f, 0.534f, 0.131f, 0f),
+            gamma = 1.00f, grain = 0.10f, vignette = 0.20f, accent = Color(0xFFA16207)
+        ),
+        FilterPreset(
+            "pastel", "Pastel", "Soft",
+            m(0.90f, 0.06f, 0.04f, 0.060f, 0.04f, 0.92f, 0.04f, 0.060f, 0.04f, 0.06f, 0.90f, 0.070f),
+            gamma = 1.08f, vignette = 0.06f, accent = Color(0xFFFBCFE8)
+        ),
+        FilterPreset(
+            "food", "Food", "People",
+            m(1.18f, -0.06f, -0.02f, 0.010f, -0.04f, 1.16f, -0.02f, 0.010f, -0.04f, -0.02f, 1.10f, 0.000f),
+            gamma = 1.02f, accent = Color(0xFFF97316)
+        ),
+        FilterPreset(
+            "sky", "Sky", "Landscape",
+            m(0.98f, 0.02f, 0.00f, 0.000f, 0.00f, 1.04f, 0.02f, 0.000f, -0.02f, 0.04f, 1.20f, 0.010f),
+            gamma = 1.03f, accent = Color(0xFF0EA5E9)
+        ),
+        FilterPreset(
+            "forest", "Forest", "Landscape",
+            m(0.92f, 0.06f, 0.00f, 0.000f, 0.02f, 1.16f, 0.02f, 0.010f, 0.00f, 0.06f, 0.94f, 0.000f),
+            gamma = 1.02f, accent = Color(0xFF15803D)
+        ),
+        FilterPreset(
+            "neon_night", "Neon Night", "Night",
+            m(1.10f, 0.02f, -0.04f, -0.010f, 0.00f, 1.00f, 0.06f, -0.010f, 0.04f, 0.00f, 1.22f, 0.020f),
+            gamma = 0.94f, grain = 0.06f, accent = Color(0xFFC026D3)
+        ),
+        FilterPreset(
+            "night", "Night", "Night",
+            m(0.92f, 0.02f, 0.02f, -0.020f, 0.00f, 0.98f, 0.04f, -0.010f, 0.02f, 0.06f, 1.14f, 0.020f),
+            gamma = 1.10f, vignette = 0.24f, accent = Color(0xFF1E3A8A)
+        ),
+        FilterPreset(
+            "sunset", "Sunset", "Warm",
+            m(1.16f, 0.04f, -0.02f, 0.020f, 0.02f, 1.02f, 0.00f, 0.005f, -0.02f, 0.02f, 0.88f, 0.005f),
+            gamma = 1.02f, accent = Color(0xFFEA580C)
+        ),
+        FilterPreset(
+            "iced", "Iced", "Cool",
+            m(0.94f, 0.00f, 0.02f, -0.005f, 0.00f, 1.02f, 0.04f, 0.005f, 0.02f, 0.06f, 1.18f, 0.020f),
+            gamma = 1.04f, accent = Color(0xFF67E8F9)
+        ),
+        FilterPreset(
+            "fade", "Fade", "Soft",
+            m(0.82f, 0.10f, 0.06f, 0.060f, 0.06f, 0.84f, 0.08f, 0.060f, 0.06f, 0.08f, 0.84f, 0.070f),
+            gamma = 1.10f, grain = 0.07f, accent = Color(0xFFD6D3D1)
+        ),
+        FilterPreset(
+            "hdr", "HDR", "Detail",
+            m(1.22f, -0.10f, -0.06f, -0.020f, -0.08f, 1.20f, -0.06f, -0.020f, -0.06f, -0.10f, 1.22f, -0.020f),
+            gamma = 0.94f, accent = Color(0xFFA3E635)
+        ),
+        FilterPreset(
+            "clay", "Clay", "Stylise",
+            m(0.96f, 0.08f, 0.04f, 0.030f, 0.06f, 0.92f, 0.06f, 0.020f, 0.05f, 0.10f, 0.84f, 0.020f),
+            gamma = 1.05f, grain = 0.05f, accent = Color(0xFFB45309)
+        ),
+        FilterPreset(
+            "cyber", "Cyber", "Stylise",
+            m(1.02f, -0.04f, 0.06f, 0.000f, -0.02f, 0.96f, 0.10f, 0.000f, 0.10f, 0.00f, 1.24f, 0.020f),
+            gamma = 0.96f, accent = Color(0xFF8B5CF6)
+        ),
+        FilterPreset(
+            "golden", "Golden Hour", "Warm",
+            m(1.18f, 0.06f, -0.04f, 0.020f, 0.03f, 1.06f, -0.02f, 0.010f, -0.04f, 0.02f, 0.86f, 0.000f),
+            gamma = 1.02f, vignette = 0.14f, accent = Color(0xFFF59E0B)
         )
     )
 
@@ -144,7 +225,16 @@ object EffectsCatalog {
         EffectPreset("sharpen", "Sharpen", "Detail", "Edge enhancement", Color(0xFFFACC15)),
         EffectPreset("vhs", "VHS", "Retro", "Tape wobble and noise", Color(0xFFF472B6), premium = true),
         EffectPreset("snow", "Snow", "Particles", "Drifting particles", Color(0xFFE0F2FE), premium = true),
-        EffectPreset("zoom_blur", "Zoom Blur", "Motion", "Radial motion blur", Color(0xFFA3E635))
+        EffectPreset("zoom_blur", "Zoom Blur", "Motion", "Radial motion blur", Color(0xFFA3E635)),
+        // --- second wave ----------------------------------------------------------------
+        EffectPreset("blur", "Blur", "Blur", "Softens the whole frame", Color(0xFF94A3B8)),
+        EffectPreset("pixelate", "Pixelate", "Stylise", "Mosaic blocks", Color(0xFF22D3EE)),
+        EffectPreset("neon", "Neon", "Stylise", "Edge glow outlines", Color(0xFF00E5FF), premium = true),
+        EffectPreset("halftone", "Halftone", "Print", "Newspaper dot pattern", Color(0xFFE5E7EB)),
+        EffectPreset("tilt_shift", "Tilt Shift", "Blur", "Miniature focus band", Color(0xFF0EA5E9)),
+        EffectPreset("old_film", "Old Film", "Retro", "Sepia, scratches and flicker", Color(0xFFD97706), premium = true),
+        EffectPreset("heat_wave", "Heat Wave", "Distort", "Rising air distortion", Color(0xFFF97316)),
+        EffectPreset("spotlight", "Spotlight", "Light", "Pool of light on the subject", Color(0xFFFACC15))
     )
 
     private val byId = presets.associateBy { it.id }
@@ -160,7 +250,11 @@ object TransitionCatalog {
         TransitionPreset(TransitionType.SLIDE_UP, "Lift", "Push the frame upwards", Color(0xFF22C55E)),
         TransitionPreset(TransitionType.ZOOM, "Zoom", "Punch through the cut", Color(0xFFF59E0B)),
         TransitionPreset(TransitionType.WIPE, "Wipe", "Hard edge sweep", Color(0xFFF43F5E)),
-        TransitionPreset(TransitionType.CIRCLE, "Iris", "Circular reveal", Color(0xFF818CF8))
+        TransitionPreset(TransitionType.CIRCLE, "Iris", "Circular reveal", Color(0xFF818CF8)),
+        TransitionPreset(TransitionType.SLIDE_RIGHT, "Push Right", "Frame exits to the right", Color(0xFF60A5FA)),
+        TransitionPreset(TransitionType.SLIDE_DOWN, "Drop", "Frame pushes downwards", Color(0xFF2DD4BF)),
+        TransitionPreset(TransitionType.GLITCH, "Glitch Cut", "Digital tearing between clips", Color(0xFFE879F9)),
+        TransitionPreset(TransitionType.BLUR, "Blur Dissolve", "Soft focus hand-off", Color(0xFF94A3B8))
     )
 
     fun preset(type: TransitionType): TransitionPreset =
@@ -180,7 +274,13 @@ object AnimationCatalog {
         TextAnimationPreset(ClipAnimationType.ROTATE_IN, "Rotate In", Color(0xFF818CF8)),
         TextAnimationPreset(ClipAnimationType.BLUR_IN, "Blur In", Color(0xFF94A3B8)),
         TextAnimationPreset(ClipAnimationType.POP, "Pop", Color(0xFFF43F5E)),
-        TextAnimationPreset(ClipAnimationType.FLICKER, "Flicker", Color(0xFFE879F9))
+        TextAnimationPreset(ClipAnimationType.FLICKER, "Flicker", Color(0xFFE879F9)),
+        TextAnimationPreset(ClipAnimationType.SHAKE, "Shake", Color(0xFFFB7185)),
+        TextAnimationPreset(ClipAnimationType.WOBBLE, "Wobble", Color(0xFFC084FC)),
+        TextAnimationPreset(ClipAnimationType.BOUNCE, "Bounce", Color(0xFF4ADE80)),
+        TextAnimationPreset(ClipAnimationType.SPIN_IN, "Spin In", Color(0xFF38BDF8)),
+        TextAnimationPreset(ClipAnimationType.FLIP_IN, "Flip In", Color(0xFFFBBF24)),
+        TextAnimationPreset(ClipAnimationType.GLITCH_IN, "Glitch In", Color(0xFFF0ABFC))
     )
 
     fun preset(type: ClipAnimationType): TextAnimationPreset =

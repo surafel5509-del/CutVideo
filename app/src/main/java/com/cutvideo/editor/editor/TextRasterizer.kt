@@ -25,6 +25,14 @@ object TextRasterizer {
      */
     fun rasterize(spec: TextSpec, frameWidth: Int, frameHeight: Int): RasterizedText? {
         if (spec.text.isBlank()) return null
+        if (frameWidth <= 0 || frameHeight <= 0) return null
+        // Text bitmaps are capped so a 4K export can never allocate a frame-sized ARGB buffer.
+        return runCatching { rasterizeInternal(spec, frameWidth, frameHeight) }.getOrNull()
+    }
+
+    private const val MAX_TEXT_PX = 2048
+
+    private fun rasterizeInternal(spec: TextSpec, frameWidth: Int, frameHeight: Int): RasterizedText? {
         // sizeSp is relative to a 1080-wide reference frame so the same spec scales across exports.
         val referenceShortSide = 1080f
         val pixelSize = spec.sizeSp * (frameWidth.coerceAtMost(frameHeight) / referenceShortSide)
@@ -61,8 +69,8 @@ object TextRasterizer {
         val padding = spec.backgroundPaddingDp * (frameWidth / 400f)
         val shadowPad = if (spec.shadow.enabled) spec.shadow.radius * 2f else 0f
 
-        val width = (maxWidth + padding * 2 + shadowPad).toInt().coerceIn(8, frameWidth)
-        val height = (totalHeight + padding * 2 + shadowPad).toInt().coerceIn(8, frameHeight)
+        val width = (maxWidth + padding * 2 + shadowPad).toInt().coerceIn(8, frameWidth).coerceAtMost(MAX_TEXT_PX)
+        val height = (totalHeight + padding * 2 + shadowPad).toInt().coerceIn(8, frameHeight).coerceAtMost(MAX_TEXT_PX)
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)

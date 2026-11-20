@@ -17,6 +17,10 @@ import java.nio.FloatBuffer
 internal class CutVideoShaderProgram {
 
     private var handle = 0
+    private var blitHandle = 0
+    private var blitProgramPosition = -1
+    private var blitProgramTexCoord = -1
+    private var blitProgramSampler = -1
     private var positionLocation = -1
     private var texCoordLocation = -1
     private var samplerLocation = -1
@@ -35,7 +39,7 @@ internal class CutVideoShaderProgram {
         1f, 1f
     )
 
-    val isValid: Boolean get() = handle != 0
+    val isValid: Boolean get() = handle != 0 || blitHandle != 0
 
     fun init(context: Context) {
         if (handle != 0) return
@@ -43,16 +47,28 @@ internal class CutVideoShaderProgram {
         val fragment = loadShaderSource(context, "shaders/cutvideo_effect.glsl", FALLBACK_FRAGMENT)
         handle = createProgram(vertex, fragment)
         if (handle == 0) {
-            Log.e(TAG, "shader program could not be created")
+            // Never leave the pipeline without a program: a broken driver/shader combination would
+            // otherwise render an empty (black) frame instead of the untouched video.
+            Log.e(TAG, "look shader failed to build, falling back to a pass-through blit")
+            blitHandle = createProgram(vertex, BLIT_FRAGMENT)
+            blitProgramPosition = GLES20.glGetAttribLocation(blitHandle, "aFramePosition")
+            blitProgramTexCoord = GLES20.glGetAttribLocation(blitHandle, "aTexSamplingCoord")
+            blitProgramSampler = GLES20.glGetUniformLocation(blitHandle, "uTexSampler")
             return
         }
         positionLocation = GLES20.glGetAttribLocation(handle, "aFramePosition")
         texCoordLocation = GLES20.glGetAttribLocation(handle, "aTexSamplingCoord")
         samplerLocation = GLES20.glGetUniformLocation(handle, "uTexSampler")
+        // Uniforms default to 0 in GLES, so an alpha uniform that is never set would hide the frame.
+        GLES20.glUseProgram(handle)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(handle, "uAlpha"), 1f)
     }
 
     fun use() {
-        if (handle != 0) GLES20.glUseProgram(handle)
+        when {
+            handle != 0 -> GLES20.glUseProgram(handle)
+            blitHandle != 0 -> GLES20.glUseProgram(blitHandle)
+        }
     }
 
     fun setTexelSize(width: Int, height: Int) {
@@ -88,6 +104,24 @@ internal class CutVideoShaderProgram {
         setEffects(look.effectIds, look.effectAmounts)
     }
 
+    /** Copies the input texture to the framework-owned output framebuffer. */
+    private fun drawBlit(inputTextureId: Int) {
+        if (blitHandle == 0) return
+        GLES20.glUseProgram(blitHandle)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, inputTextureId)
+        if (blitProgramSampler >= 0) GLES20.glUniform1i(blitProgramSampler, 0)
+        GLES20.glEnableVertexAttribArray(blitProgramPosition)
+        GLES20.glVertexAttribPointer(blitProgramPosition, 2, GLES20.GL_FLOAT, false, 0, positionBuffer)
+        if (blitProgramTexCoord >= 0) {
+            GLES20.glEnableVertexAttribArray(blitProgramTexCoord)
+            GLES20.glVertexAttribPointer(blitProgramTexCoord, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer)
+        }
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisableVertexAttribArray(blitProgramPosition)
+        if (blitProgramTexCoord >= 0) GLES20.glDisableVertexAttribArray(blitProgramTexCoord)
+    }
+
     private fun setEffects(ids: IntArray, amounts: FloatArray) {
         val idArray = IntArray(4)
         val amountArray = FloatArray(4)
@@ -102,7 +136,10 @@ internal class CutVideoShaderProgram {
     }
 
     fun draw(inputTextureId: Int) {
-        if (handle == 0) return
+        if (handle == 0) {
+            drawBlit(inputTextureId)
+            return
+        }
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, inputTextureId)
         if (samplerLocation >= 0) GLES20.glUniform1i(samplerLocation, 0)
@@ -124,6 +161,10 @@ internal class CutVideoShaderProgram {
         if (handle != 0) {
             GLES20.glDeleteProgram(handle)
             handle = 0
+        }
+        if (blitHandle != 0) {
+            GLES20.glDeleteProgram(blitHandle)
+            blitHandle = 0
         }
         uniforms.clear()
     }
@@ -229,6 +270,21 @@ internal class CutVideoShaderProgram {
             void main() {
                 vec4 c = texture(uTexSampler, vTex);
                 fragColor = vec4(c.rgb, c.a * uAlpha);
+            }
+        """.trimIndent()
+
+        /**
+         * Minimal copy program used when the look shader cannot be built on this GPU/driver.
+         * It only samples the input texture, so the frame always reaches the encoder.
+         */
+        val BLIT_FRAGMENT = """
+            #version 300 es
+            precision mediump float;
+            in vec2 vTex;
+            out vec4 fragColor;
+            uniform sampler2D uTexSampler;
+            void main() {
+                fragColor = texture(uTexSampler, vTex);
             }
         """.trimIndent()
 

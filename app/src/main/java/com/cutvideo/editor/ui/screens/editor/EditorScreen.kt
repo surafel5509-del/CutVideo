@@ -46,7 +46,10 @@ import androidx.compose.material.icons.rounded.CallSplit
 import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DoneAll
+import androidx.compose.material.icons.rounded.AutoFixNormal
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.FilterVintage
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Layers
@@ -361,7 +364,12 @@ fun EditorScreen(
             onText = onOpenTextEditor,
             onFreeze = { vm.freezeFrame(); clipMenu = null },
             onExtractAudio = { vm.extractAudio(); clipMenu = null },
-            onAddTrack = { vm.addTrack(it); clipMenu = null }
+            onAddTrack = { vm.addTrack(it); clipMenu = null },
+            onCopyStyle = { vm.copyStyle(); clipMenu = null },
+            onPasteStyle = { vm.pasteStyle(); clipMenu = null },
+            onApplyLookToAll = { vm.applyStyleToAll(); clipMenu = null },
+            onAutoEnhance = { vm.autoEnhance(); clipMenu = null },
+            onSendToOverlay = { vm.moveToOverlay(); clipMenu = null }
         )
     }
 }
@@ -794,7 +802,12 @@ private fun ClipContextDialog(
     onText: () -> Unit,
     onFreeze: () -> Unit,
     onExtractAudio: () -> Unit,
-    onAddTrack: (TrackType) -> Unit
+    onAddTrack: (TrackType) -> Unit,
+    onCopyStyle: () -> Unit,
+    onPasteStyle: () -> Unit,
+    onApplyLookToAll: () -> Unit,
+    onAutoEnhance: () -> Unit,
+    onSendToOverlay: () -> Unit
 ) {
     val actions = listOf(
         Triple(Icons.Rounded.ContentCut, "Split at playhead", onSplit),
@@ -811,7 +824,12 @@ private fun ClipContextDialog(
         Triple(Icons.Rounded.PictureInPictureAlt, "Picture in picture", onPip),
         Triple(Icons.Rounded.TextFields, "Text", onText),
         Triple(Icons.Rounded.MoreHoriz, "Freeze frame", onFreeze),
-        Triple(Icons.Rounded.MusicNote, "Extract audio", onExtractAudio)
+        Triple(Icons.Rounded.MusicNote, "Extract audio", onExtractAudio),
+        Triple(Icons.Rounded.ContentCopy, "Copy style", onCopyStyle),
+        Triple(Icons.Rounded.ContentPaste, "Paste style", onPasteStyle),
+        Triple(Icons.Rounded.DoneAll, "Apply look to all clips", onApplyLookToAll),
+        Triple(Icons.Rounded.AutoFixNormal, "Auto enhance", onAutoEnhance),
+        Triple(Icons.Rounded.Layers, "Send to overlay", onSendToOverlay)
     )
     AlertDialog(
         onDismissRequest = onDismiss,

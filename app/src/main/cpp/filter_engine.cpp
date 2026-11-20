@@ -358,6 +358,204 @@ void applyEffect(Image& img, EffectId id, float intensity, float time, float asp
             }
             break;
         }
+
+        case EffectId::kBlur:
+            applyBlur(img, 2.0f + 16.0f * t);
+            break;
+
+        case EffectId::kPixelate: {
+            const int cell = std::max(2, static_cast<int>(4.0f + (1.0f - t) * 44.0f));
+            for (int by = 0; by < h; by += cell) {
+                const int y1 = std::min(h, by + cell);
+                for (int bx = 0; bx < w; bx += cell) {
+                    const int x1 = std::min(w, bx + cell);
+                    float acc[3] = {0.0f, 0.0f, 0.0f};
+                    int n = 0;
+                    for (int y = by; y < y1; ++y) {
+                        const uint8_t* p = img.row(y);
+                        for (int x = bx; x < x1; ++x, ++n) {
+                            acc[0] += p[x * 4 + 0];
+                            acc[1] += p[x * 4 + 1];
+                            acc[2] += p[x * 4 + 2];
+                        }
+                    }
+                    if (n == 0) continue;
+                    const float inv = 1.0f / static_cast<float>(n);
+                    for (int y = by; y < y1; ++y) {
+                        uint8_t* p = img.row(y);
+                        for (int x = bx; x < x1; ++x) {
+                            for (int c = 0; c < 3; ++c) p[x * 4 + c] = clamp8(acc[c] * inv);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        case EffectId::kNeon: {
+            std::vector<uint8_t> src(static_cast<size_t>(img.stride) * h);
+            Image srcView(src.data(), w, h, img.stride);
+            copyImage(img, srcView);
+            for (int y = 0; y < h; ++y) {
+                uint8_t* p = img.row(y);
+                const uint8_t* rowUp = src.data() + static_cast<size_t>(std::max(0, y - 1)) * img.stride;
+                const uint8_t* rowDown = src.data() + static_cast<size_t>(std::min(h - 1, y + 1)) * img.stride;
+                const uint8_t* rowMid = src.data() + static_cast<size_t>(y) * img.stride;
+                const float ny = static_cast<float>(y) / static_cast<float>(std::max(1, h - 1));
+                const float tint = 0.5f + 0.5f * std::sin(ny * 3.2f + time * 0.8f);
+                const float er = lerpf(0.15f, 1.00f, tint);
+                const float eg = lerpf(0.95f, 0.25f, tint);
+                const float eb = lerpf(1.00f, 0.85f, tint);
+                for (int x = 0; x < w; ++x) {
+                    const int xm = std::max(0, x - 1), xp = std::min(w - 1, x + 1);
+                    const float lx = luma(rowMid[xp * 4] / 255.0f, rowMid[xp * 4 + 1] / 255.0f,
+                                          rowMid[xp * 4 + 2] / 255.0f) -
+                                     luma(rowMid[xm * 4] / 255.0f, rowMid[xm * 4 + 1] / 255.0f,
+                                          rowMid[xm * 4 + 2] / 255.0f);
+                    const float ly = luma(rowDown[x * 4] / 255.0f, rowDown[x * 4 + 1] / 255.0f,
+                                          rowDown[x * 4 + 2] / 255.0f) -
+                                     luma(rowUp[x * 4] / 255.0f, rowUp[x * 4 + 1] / 255.0f,
+                                          rowUp[x * 4 + 2] / 255.0f);
+                    const float edge = clamp01(std::sqrt(lx * lx + ly * ly) * 2.4f);
+                    const float base = 1.0f - 0.45f * t;
+                    const float glow = edge * t * 1.6f;
+                    p[x * 4 + 0] = clamp8((rowMid[x * 4 + 0] / 255.0f * base + er * glow) * 255.0f);
+                    p[x * 4 + 1] = clamp8((rowMid[x * 4 + 1] / 255.0f * base + eg * glow) * 255.0f);
+                    p[x * 4 + 2] = clamp8((rowMid[x * 4 + 2] / 255.0f * base + eb * glow) * 255.0f);
+                }
+            }
+            break;
+        }
+
+        case EffectId::kHalftone: {
+            const float cellPx = 7.0f - 2.0f * t;
+            for (int y = 0; y < h; ++y) {
+                uint8_t* p = img.row(y);
+                const float fy = std::fmod(static_cast<float>(y) / cellPx, 1.0f) - 0.5f;
+                for (int x = 0; x < w; ++x) {
+                    const float r = p[x * 4 + 0] / 255.0f;
+                    const float g = p[x * 4 + 1] / 255.0f;
+                    const float b = p[x * 4 + 2] / 255.0f;
+                    const float l = luma(r, g, b);
+                    const float fx = std::fmod(static_cast<float>(x) / cellPx, 1.0f) - 0.5f;
+                    const float d = std::sqrt(fx * fx + fy * fy);
+                    const float radius = 0.5f * std::sqrt(std::max(0.0f, 1.0f - l));
+                    const float ink = 1.0f - smoothstepf(radius - 0.05f, radius + 0.05f, d);
+                    const float v = lerpf(0.94f - 0.08f * l, 0.05f, ink);
+                    p[x * 4 + 0] = clamp8(lerpf(r, v * 1.04f, t) * 255.0f);
+                    p[x * 4 + 1] = clamp8(lerpf(g, v * 1.00f, t) * 255.0f);
+                    p[x * 4 + 2] = clamp8(lerpf(b, v * 0.93f, t) * 255.0f);
+                }
+            }
+            break;
+        }
+
+        case EffectId::kTiltShift: {
+            std::vector<uint8_t> src(static_cast<size_t>(img.stride) * h);
+            Image srcView(src.data(), w, h, img.stride);
+            copyImage(img, srcView);
+            for (int y = 0; y < h; ++y) {
+                uint8_t* p = img.row(y);
+                const float ny = std::fabs(static_cast<float>(y) / static_cast<float>(std::max(1, h - 1)) - 0.5f) * 2.0f;
+                const float strength = smoothstepf(0.12f, 0.8f, ny) * t;
+                const int radius = static_cast<int>(strength * 24.0f);
+                if (radius < 1) continue;
+                const int strideY = std::max(1, radius / 2);
+                for (int x = 0; x < w; ++x) {
+                    float acc[3] = {0.0f, 0.0f, 0.0f};
+                    int n = 0;
+                    for (int k = -radius; k <= radius; k += strideY) {
+                        const int sy = std::max(0, std::min(h - 1, y + k));
+                        const uint8_t* q = src.data() + static_cast<size_t>(sy) * img.stride;
+                        acc[0] += q[x * 4 + 0];
+                        acc[1] += q[x * 4 + 1];
+                        acc[2] += q[x * 4 + 2];
+                        ++n;
+                    }
+                    if (n == 0) continue;
+                    const float inv = 1.0f / static_cast<float>(n);
+                    for (int c = 0; c < 3; ++c) p[x * 4 + c] = clamp8(acc[c] * inv);
+                }
+            }
+            break;
+        }
+
+        case EffectId::kOldFilm: {
+            // Sepia tone, projector flicker, warm vignette and occasional scratches.
+            const float flicker = 1.0f + 0.05f * std::sin(time * 9.0f) +
+                                  0.04f * (hash11(std::floor(time * 12.0f)) - 0.5f);
+            const float cx = 0.5f, cy = 0.5f;
+            for (int y = 0; y < h; ++y) {
+                uint8_t* p = img.row(y);
+                const float ny = static_cast<float>(y) / static_cast<float>(std::max(1, h - 1));
+                for (int x = 0; x < w; ++x) {
+                    const float r = p[x * 4 + 0] / 255.0f;
+                    const float g = p[x * 4 + 1] / 255.0f;
+                    const float b = p[x * 4 + 2] / 255.0f;
+                    const float sr = 0.393f * r + 0.769f * g + 0.189f * b;
+                    const float sg = 0.349f * r + 0.686f * g + 0.168f * b;
+                    const float sb = 0.272f * r + 0.534f * g + 0.131f * b;
+                    const float nx = static_cast<float>(x) / static_cast<float>(std::max(1, w - 1));
+                    const float dx = (nx - cx) * aspect, dy = ny - cy;
+                    const float vig = 1.0f - t * 0.65f * smoothstepf(0.15f, 0.85f, std::sqrt(dx * dx + dy * dy));
+                    const float k = flicker * vig;
+                    p[x * 4 + 0] = clamp8(lerpf(r, sr, t) * k * 255.0f);
+                    p[x * 4 + 1] = clamp8(lerpf(g, sg, t) * k * 255.0f);
+                    p[x * 4 + 2] = clamp8(lerpf(b, sb, t) * k * 255.0f);
+                }
+            }
+            const int scratches = static_cast<int>(2 + 5 * t);
+            for (int i = 0; i < scratches; ++i) {
+                const float seed = static_cast<float>(i) * 3.7f;
+                const int sx = static_cast<int>(hash11(seed + std::floor(time * 8.0f) * 0.77f) * w);
+                if (sx < 0 || sx >= w) continue;
+                const int top = static_cast<int>(hash11(seed * 1.7f) * h * 0.5f);
+                const int len = static_cast<int>(h * (0.2f + 0.5f * hash11(seed * 2.3f)));
+                const float alpha = 0.22f * t;
+                for (int y = top; y < std::min(h, top + len); ++y) {
+                    uint8_t* p = img.row(y) + sx * 4;
+                    for (int c = 0; c < 3; ++c) p[c] = clamp8(lerpf(p[c] / 255.0f, 0.96f, alpha) * 255.0f);
+                }
+            }
+            break;
+        }
+
+        case EffectId::kHeatWave: {
+            std::vector<uint8_t> src(static_cast<size_t>(img.stride) * h);
+            Image srcView(src.data(), w, h, img.stride);
+            copyImage(img, srcView);
+            for (int y = 0; y < h; ++y) {
+                uint8_t* p = img.row(y);
+                const uint8_t* s = src.data() + static_cast<size_t>(y) * img.stride;
+                const float fy = static_cast<float>(y);
+                const float shift = (std::sin(fy * 0.09f + time * 3.1f) * 7.0f +
+                                     std::sin(fy * 0.31f - time * 1.7f) * 3.0f) * t;
+                for (int x = 0; x < w; ++x) {
+                    const int sx = std::max(0, std::min(w - 1, x + static_cast<int>(shift)));
+                    for (int c = 0; c < 4; ++c) p[x * 4 + c] = s[sx * 4 + c];
+                }
+            }
+            break;
+        }
+
+        case EffectId::kSpotlight: {
+            const float cx = 0.5f, cy = 0.42f;
+            for (int y = 0; y < h; ++y) {
+                uint8_t* p = img.row(y);
+                const float ny = static_cast<float>(y) / static_cast<float>(std::max(1, h - 1));
+                for (int x = 0; x < w; ++x) {
+                    const float nx = static_cast<float>(x) / static_cast<float>(std::max(1, w - 1));
+                    const float dx = (nx - cx) * aspect, dy = ny - cy;
+                    const float r = std::sqrt(dx * dx + dy * dy) / 0.62f;
+                    const float light = 1.0f - smoothstepf(0.1f, 1.0f, r);
+                    const float gain = lerpf(1.0f - 0.8f * t, 1.0f + 0.25f * t, light);
+                    p[x * 4 + 0] = clamp8(p[x * 4 + 0] * gain * (1.0f + 0.06f * t * light));
+                    p[x * 4 + 1] = clamp8(p[x * 4 + 1] * gain * (1.0f + 0.02f * t * light));
+                    p[x * 4 + 2] = clamp8(p[x * 4 + 2] * gain * (1.0f - 0.04f * t * light));
+                }
+            }
+            break;
+        }
     }
 }
 

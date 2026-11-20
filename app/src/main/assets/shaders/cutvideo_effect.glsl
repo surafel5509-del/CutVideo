@@ -183,6 +183,58 @@ vec3 applyOneEffect(vec3 color, vec2 uv, int id, float amount) {
             acc += sampleRgb((uv - 0.5) * s + 0.5);
         }
         return mix(color, acc / 6.0, 0.85);
+    } else if (id == 16) {   // blur
+        return blur9(uv, 3.0 + 24.0 * amount);
+    } else if (id == 17) {   // pixelate
+        float cells = 22.0 + (1.0 - amount) * 170.0;
+        vec2 snapped = (floor(uv * cells) + 0.5) / cells;
+        return sampleRgb(snapped);
+    } else if (id == 18) {   // neon edge glow
+        float lx = luma(sampleRgb(uv + vec2(uTexelSize.x * 2.0, 0.0))) -
+                   luma(sampleRgb(uv - vec2(uTexelSize.x * 2.0, 0.0)));
+        float ly = luma(sampleRgb(uv + vec2(0.0, uTexelSize.y * 2.0))) -
+                   luma(sampleRgb(uv - vec2(0.0, uTexelSize.y * 2.0)));
+        float edge = clamp(length(vec2(lx, ly)) * 3.0, 0.0, 1.0);
+        vec3 tint = mix(vec3(0.15, 0.95, 1.0), vec3(1.0, 0.25, 0.85),
+                        0.5 + 0.5 * sin(uv.y * 3.2 + uTime * 0.8));
+        return clamp(color * (1.0 - 0.45 * amount) + tint * edge * amount * 1.6, 0.0, 1.0);
+    } else if (id == 19) {   // halftone print
+        vec2 px = uv / max(uTexelSize, vec2(1e-6));
+        float cellPx = 7.0 - 2.0 * amount;
+        vec2 f = fract(px / cellPx) - 0.5;
+        float d = length(f);
+        float l = luma(color);
+        float radius = 0.5 * sqrt(max(0.0, 1.0 - l));
+        float ink = 1.0 - smoothstep(radius - 0.05, radius + 0.05, d);
+        float v = mix(0.94 - 0.08 * l, 0.05, ink);
+        return mix(color, vec3(v * 1.04, v, v * 0.93), amount);
+    } else if (id == 20) {   // tilt shift
+        float ny = abs(uv.y - 0.5) * 2.0;
+        float strength = smoothstep(0.12, 0.8, ny) * amount;
+        return strength > 0.01 ? blur9(uv, strength * 30.0) : color;
+    } else if (id == 21) {   // old film
+        vec3 sepia = vec3(0.393 * color.r + 0.769 * color.g + 0.189 * color.b,
+                          0.349 * color.r + 0.686 * color.g + 0.168 * color.b,
+                          0.272 * color.r + 0.534 * color.g + 0.131 * color.b);
+        float flick = 1.0 + 0.05 * sin(uTime * 9.0) + 0.04 * (hash11(floor(uTime * 12.0)) - 0.5);
+        vec2 p = (uv - 0.5) * vec2(uAspect, 1.0);
+        float vig = 1.0 - amount * 0.65 * smoothstep(0.15, 0.85, length(p));
+        vec2 px = uv / max(uTexelSize, vec2(1e-6));
+        float scratch = step(0.9965, hash21(vec2(floor(px.x * 0.5), floor(uTime * 8.0))));
+        vec3 c = mix(color, sepia, amount) * flick * vig;
+        return mix(c, vec3(0.96), scratch * amount * 0.35);
+    } else if (id == 22) {   // heat wave
+        vec2 px = uv / max(uTexelSize, vec2(1e-6));
+        float shift = (sin(px.y * 0.09 + uTime * 3.1) * 7.0 + sin(px.y * 0.31 - uTime * 1.7) * 3.0) * amount;
+        return sampleRgb(uv + vec2(shift * uTexelSize.x, 0.0));
+    } else if (id == 23) {   // spotlight
+        vec2 p = (uv - vec2(0.5, 0.42)) * vec2(uAspect, 1.0);
+        float r = length(p) / 0.62;
+        float light = 1.0 - smoothstep(0.1, 1.0, r);
+        float gain = mix(1.0 - 0.8 * amount, 1.0 + 0.25 * amount, light);
+        return clamp(color * gain * vec3(1.0 + 0.06 * amount * light,
+                                         1.0 + 0.02 * amount * light,
+                                         1.0 - 0.04 * amount * light), 0.0, 1.0);
     }
     return color;
 }

@@ -4,6 +4,8 @@ import com.cutvideo.editor.domain.model.AnimationFrame
 import com.cutvideo.editor.domain.model.Clip
 import com.cutvideo.editor.domain.model.ClipAnimationType
 import com.cutvideo.editor.domain.model.TransitionType
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -43,6 +45,37 @@ object AnimationEngine {
                 val blend = smoothstep(0.55f, 1f, t)
                 AnimationFrame(alpha = flick + (1f - flick) * blend)
             }
+            ClipAnimationType.SHAKE -> AnimationFrame(
+                alpha = min(1f, t * 2.5f),
+                translateX = sin(t * 55f) * (1f - t) * 0.10f,
+                translateY = cos(t * 47f) * (1f - t) * 0.06f
+            )
+            ClipAnimationType.WOBBLE -> AnimationFrame(
+                alpha = min(1f, t * 1.8f),
+                scale = 0.90f + 0.10f * t,
+                rotationDegrees = sin(t * 22f) * (1f - t) * 14f
+            )
+            ClipAnimationType.BOUNCE -> {
+                val hop = abs(sin(t * 12.566f)) * (1f - t)
+                AnimationFrame(
+                    alpha = min(1f, t * 3f),
+                    scale = 1f - 0.35f * (1f - t) + 0.18f * hop
+                )
+            }
+            ClipAnimationType.SPIN_IN -> AnimationFrame(
+                alpha = min(1f, t * 1.8f),
+                scale = 0.60f + 0.40f * t,
+                rotationDegrees = (1f - t) * -180f
+            )
+            ClipAnimationType.FLIP_IN -> AnimationFrame(
+                alpha = min(1f, t * 1.6f),
+                scale = abs(cos((1f - t) * 1.5707964f))
+            )
+            ClipAnimationType.GLITCH_IN -> AnimationFrame(
+                alpha = t,
+                translateX = sin(t * 70f) * (1f - t) * 0.05f,
+                blurRadiusPx = (1f - t) * 6f
+            )
         }
     }
 
@@ -55,6 +88,13 @@ object AnimationEngine {
             TransitionType.ZOOM -> AnimationFrame(alpha = t, scale = 0.72f + 0.28f * t)
             TransitionType.WIPE -> AnimationFrame(wipe = t)
             TransitionType.CIRCLE -> AnimationFrame(wipe = t)
+            TransitionType.SLIDE_RIGHT -> AnimationFrame(translateX = -(1f - t))
+            TransitionType.SLIDE_DOWN -> AnimationFrame(translateY = -(1f - t))
+            TransitionType.GLITCH -> AnimationFrame(
+                alpha = t,
+                translateX = sin(t * 60f) * (1f - t) * 0.04f
+            )
+            TransitionType.BLUR -> AnimationFrame(alpha = t, blurRadiusPx = (1f - t) * 20f)
         }
     }
 
@@ -92,6 +132,7 @@ object AnimationEngine {
                 val f = sampleTransition(spec.type, progress(local, spec.durationUs))
                 alpha *= f.alpha; scale *= f.scale
                 tx += f.translateX; ty += f.translateY
+                rotation += f.rotationDegrees; blur += f.blurRadiusPx
                 wipe = min(wipe, f.wipe)
             }
         }
@@ -102,6 +143,7 @@ object AnimationEngine {
                 val f = sampleTransition(spec.type, progress(clip.durationUs - local, spec.durationUs))
                 alpha *= f.alpha; scale *= f.scale
                 tx -= f.translateX; ty -= f.translateY
+                rotation -= f.rotationDegrees; blur += f.blurRadiusPx
                 wipe = min(wipe, f.wipe)
             }
         }

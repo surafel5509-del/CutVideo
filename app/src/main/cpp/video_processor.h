@@ -39,7 +39,17 @@ enum class EffectId : int32_t {
     kSharpen = 12,
     kVhs = 13,
     kSnow = 14,
-    kZoomBlur = 15
+    kZoomBlur = 15,
+    // Appended in catalogue order — ids are part of the Kotlin/native contract
+    // (`NativeEffectIds.order`), so new effects always go at the end.
+    kBlur = 16,
+    kPixelate = 17,
+    kNeon = 18,
+    kHalftone = 19,
+    kTiltShift = 20,
+    kOldFilm = 21,
+    kHeatWave = 22,
+    kSpotlight = 23
 };
 
 struct EffectSetting {

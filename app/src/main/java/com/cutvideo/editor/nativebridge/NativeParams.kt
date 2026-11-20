@@ -58,7 +58,15 @@ object NativeEffectIds {
         "sharpen" to 12,
         "vhs" to 13,
         "snow" to 14,
-        "zoom_blur" to 15
+        "zoom_blur" to 15,
+        "blur" to 16,
+        "pixelate" to 17,
+        "neon" to 18,
+        "halftone" to 19,
+        "tilt_shift" to 20,
+        "old_film" to 21,
+        "heat_wave" to 22,
+        "spotlight" to 23
     )
 
     init {

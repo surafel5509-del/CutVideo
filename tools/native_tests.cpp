@@ -227,6 +227,34 @@ void testEffects() {
     }
     check(changed > 10, "grain perturbs a flat frame");
 
+    // Second-wave effects (native ids 16..23): each must be reachable, change real pixels and
+    // leave alpha untouched, so the GLSL/CPU pair can never silently no-op.
+    for (int id = 16; id <= 23; ++id) {
+        TestImage img(24, 24);
+        for (int y = 0; y < 24; ++y) {
+            for (int x = 0; x < 24; ++x) {
+                setPixel(img, x, y, static_cast<uint8_t>(x * 9), static_cast<uint8_t>(y * 9),
+                         static_cast<uint8_t>((x + y) * 4), 255);
+            }
+        }
+        std::vector<uint8_t> before(static_cast<size_t>(img.view.stride) * 24);
+        std::memcpy(before.data(), img.view.data, before.size());
+        applyEffect(img.view, static_cast<EffectId>(id), 1.0f, 1.5f, 1.0f);
+        int changedPixels = 0;
+        bool alphaIntact = true;
+        for (int y = 0; y < 24; ++y) {
+            const uint8_t* row = img.view.row(y);
+            for (int x = 0; x < 24; ++x) {
+                if (std::memcmp(row + x * 4, before.data() + static_cast<size_t>(y) * img.view.stride + x * 4, 4) != 0) {
+                    ++changedPixels;
+                }
+                if (row[x * 4 + 3] != 255) alphaIntact = false;
+            }
+        }
+        check(changedPixels > 20, "effect " + std::to_string(id) + " changes the frame");
+        check(alphaIntact, "effect " + std::to_string(id) + " keeps the frame opaque");
+    }
+
     // Both channels of the effect stack must run, in order.
     TestImage stack(4, 4);
     fillImage(stack.view, 90, 60, 30, 255);
@@ -326,6 +354,20 @@ ClipDesc makeClip(int64_t start, int64_t duration, float speed = 1.0f) {
 
 void testTimeline() {
     section("timeline math");
+    // Every motion/transition declared in the header must resolve to a finished, fully visible
+    // state at progress 1 so the Kotlin mirror (AnimationEngine) and the pre-render agree.
+    for (int i = 1; i <= static_cast<int>(AnimationType::kGlitchIn); ++i) {
+        const AnimationState s = sampleAnimation(static_cast<AnimationType>(i), 1.0f);
+        check(s.alpha >= 0.999f && s.alpha <= 1.0001f,
+              "animation " + std::to_string(i) + " ends fully opaque");
+        check(s.scale > 0.0f, "animation " + std::to_string(i) + " keeps a positive scale");
+    }
+    for (int i = 0; i <= static_cast<int>(TransitionType::kBlur); ++i) {
+        const AnimationState s = sampleTransition(static_cast<TransitionType>(i), 1.0f);
+        check(s.alpha >= 0.999f && s.wipe >= 0.999f && std::fabs(s.translateX) < 0.001f &&
+                  std::fabs(s.translateY) < 0.001f,
+              "transition " + std::to_string(i) + " completes at progress 1");
+    }
     ClipDesc clip = makeClip(1'000'000, 2'000'000, 2.0f);
     check(!clipContains(clip, 999'999), "clip does not contain time before the start");
     check(clipContains(clip, 1'000'000), "clip contains its start time");

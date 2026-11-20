@@ -8,7 +8,9 @@ import com.cutvideo.editor.data.repository.MediaRepository
 import com.cutvideo.editor.data.repository.ProjectRepository
 import com.cutvideo.editor.data.repository.SettingsRepository
 import com.cutvideo.editor.domain.history.UndoRedoManager
+import com.cutvideo.editor.domain.model.Adjustments
 import com.cutvideo.editor.domain.model.AspectRatio
+import com.cutvideo.editor.domain.model.ChromaKeySpec
 import com.cutvideo.editor.domain.model.Clip
 import com.cutvideo.editor.domain.model.ClipAnimationType
 import com.cutvideo.editor.domain.model.EffectSpec
@@ -24,6 +26,8 @@ import com.cutvideo.editor.domain.timeline.TimelineManager
 import com.cutvideo.editor.media.MediaImporter
 import com.cutvideo.editor.media.ThumbnailStore
 import com.cutvideo.editor.nativebridge.NativeEngine
+import kotlin.math.abs
+import kotlin.math.sqrt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -253,13 +257,19 @@ class EditorController(
     }
 
     fun toggleEffect(clipId: String, effectId: String, intensity: Float = 0.5f) {
+        // Four simultaneous effects is the shader/native limit; say so instead of silently dropping.
+        val clip = _doc.value?.clip(clipId)
+        if (clip != null && clip.effects.none { it.id == effectId } && clip.effects.size >= MAX_EFFECTS) {
+            _status.value = EditorStatus.Error("Up to $MAX_EFFECTS effects per clip — remove one first")
+            return
+        }
         mutate("Toggle effect") {
             TimelineManager.updateClip(it, clipId) { clip ->
                 val existing = clip.effects.firstOrNull { e -> e.id == effectId }
                 val effects = if (existing != null) {
                     clip.effects - existing
                 } else {
-                    (clip.effects + EffectSpec(effectId, intensity)).take(4)
+                    (clip.effects + EffectSpec(effectId, intensity)).take(MAX_EFFECTS)
                 }
                 clip.copy(effects = effects)
             }
@@ -268,7 +278,7 @@ class EditorController(
 
     fun setEffects(clipId: String, effects: List<EffectSpec>) {
         mutate("Update effects") {
-            TimelineManager.updateClip(it, clipId) { clip -> clip.copy(effects = effects.take(4)) }
+            TimelineManager.updateClip(it, clipId) { clip -> clip.copy(effects = effects.take(MAX_EFFECTS)) }
         }
     }
 
@@ -311,6 +321,171 @@ class EditorController(
     }
 
     // ---------------------------------------------------------------------------------------------
+    // Pro tools
+    // ---------------------------------------------------------------------------------------------
+
+    /** The reusable part of a clip's look: filter, effects, adjustments, chroma key and blur. */
+    data class ClipStyle(
+        val adjust: Adjustments = Adjustments(),
+        val filter: FilterSpec = FilterSpec(),
+        val effects: List<EffectSpec> = emptyList(),
+        val chroma: ChromaKeySpec = ChromaKeySpec(),
+        val blur: Float = 0f
+    )
+
+    private var styleClipboard: ClipStyle? = null
+
+    val hasCopiedStyle: Boolean get() = styleClipboard != null
+
+    /** Copies the look of a clip so it can be pasted on other clips or the whole timeline. */
+    fun copyStyle(clipId: String): Boolean {
+        val clip = _doc.value?.clip(clipId) ?: return false
+        styleClipboard = ClipStyle(clip.adjust, clip.filter, clip.effects, clip.chroma, clip.blur)
+        return true
+    }
+
+    fun pasteStyle(clipId: String): Boolean {
+        val style = styleClipboard ?: return false
+        mutate("Paste style") { doc -> applyStyle(doc, clipId, style) }
+        return true
+    }
+
+    /** Applies the look of [clipId] to every other video/overlay clip. Returns how many changed. */
+    fun applyStyleToAll(clipId: String): Int {
+        val doc = _doc.value ?: return 0
+        val source = doc.clip(clipId) ?: return 0
+        val style = ClipStyle(source.adjust, source.filter, source.effects, source.chroma, source.blur)
+        var changed = 0
+        mutate("Apply look to all") { current ->
+            var next = current
+            current.tracks
+                .filter { it.type == TrackType.VIDEO || it.type == TrackType.OVERLAY }
+                .flatMap { it.clips }
+                .filter { it.id != clipId && !it.isText }
+                .forEach { target ->
+                    next = applyStyle(next, target.id, style)
+                    changed++
+                }
+            next
+        }
+        return changed
+    }
+
+    private fun applyStyle(doc: ProjectDoc, clipId: String, style: ClipStyle): ProjectDoc =
+        TimelineManager.updateClip(doc, clipId) { clip ->
+            clip.copy(
+                adjust = style.adjust,
+                filter = style.filter,
+                effects = style.effects,
+                chroma = style.chroma,
+                blur = style.blur
+            )
+        }
+
+    /**
+     * One-tap enhancement derived from an actual frame of the clip (not a fixed preset): the mean
+     * luminance drives exposure, the standard deviation drives contrast, measured colourfulness
+     * drives saturation and a low local gradient raises sharpening.
+     */
+    suspend fun autoEnhance(clipId: String): Boolean {
+        val clip = _doc.value?.clip(clipId) ?: return false
+        if (clip.uri.isBlank()) return false
+        _status.value = EditorStatus.Working("Analysing exposure…")
+        val bitmap = withContext(Dispatchers.IO) {
+            runCatching { thumbnailStore.frame(clip.uri, clip.sourceInUs, 192) }.getOrNull()
+        }
+        val stats = bitmap?.let { runCatching { frameStats(it) }.getOrNull() }
+        if (stats == null) {
+            _status.value = EditorStatus.Error("Could not read a frame from this clip")
+            return false
+        }
+        val adjust = clip.adjust.copy(
+            brightness = ((0.48f - stats.mean) * 0.9f).coerceIn(-0.30f, 0.30f),
+            contrast = ((0.16f - stats.std) * 2.0f).coerceIn(-0.10f, 0.28f),
+            saturation = when {
+                stats.saturation < 0.12f -> 0.30f
+                stats.saturation < 0.22f -> 0.16f
+                else -> 0.05f
+            },
+            sharpen = if (stats.detail < 0.06f) 0.18f else 0f
+        )
+        mutate("Auto enhance") { doc ->
+            TimelineManager.updateClip(doc, clipId) { it.copy(adjust = adjust) }
+        }
+        _status.value = EditorStatus.Idle
+        return true
+    }
+
+    /** Moves a video clip onto the overlay track so it can be composited on top. */
+    fun moveToOverlay(clipId: String): Boolean {
+        val doc = _doc.value ?: return false
+        val clip = doc.clip(clipId) ?: return false
+        if (clip.isText || clip.trackType != TrackType.VIDEO) return false
+        mutate("Send to overlay") { current ->
+            var next = current
+            val trackId = current.tracks.firstOrNull { it.type == TrackType.OVERLAY }?.id ?: run {
+                val (withTrack, id) = TimelineManager.addTrack(current, TrackType.OVERLAY)
+                next = withTrack
+                id
+            }
+            TimelineManager.moveClip(next, clipId, clip.startUs, trackId)
+        }
+        return true
+    }
+
+    private data class FrameStats(val mean: Float, val std: Float, val saturation: Float, val detail: Float)
+
+    /** Samples up to 48x48 pixels: cheap enough to run on the main thread for a thumbnail. */
+    private fun frameStats(bitmap: Bitmap): FrameStats {
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w <= 0 || h <= 0) return FrameStats(0.5f, 0.18f, 0.3f, 0.1f)
+        val stepX = (w / 48).coerceAtLeast(1)
+        val stepY = (h / 48).coerceAtLeast(1)
+        var n = 0
+        var sum = 0.0
+        var sumSq = 0.0
+        var satSum = 0.0
+        var detailSum = 0.0
+        var previousRow: FloatArray? = null
+        var y = 0
+        while (y < h) {
+            val row = FloatArray((w - 1) / stepX + 1)
+            var index = 0
+            var x = 0
+            while (x < w) {
+                val color = bitmap.getPixel(x, y)
+                val r = ((color shr 16) and 0xFF) / 255f
+                val g = ((color shr 8) and 0xFF) / 255f
+                val b = (color and 0xFF) / 255f
+                val l = 0.2126f * r + 0.7152f * g + 0.0722f * b
+                if (index < row.size) row[index] = l
+                val previous = previousRow
+                if (previous != null && index < previous.size) detailSum += abs(l - previous[index])
+                val maxC = maxOf(r, g, b)
+                val minC = minOf(r, g, b)
+                satSum += if (maxC > 0.001f) (maxC - minC) / maxC else 0f
+                sum += l
+                sumSq += l.toDouble() * l
+                n++
+                index++
+                x += stepX
+            }
+            previousRow = row
+            y += stepY
+        }
+        if (n == 0) return FrameStats(0.5f, 0.18f, 0.3f, 0.1f)
+        val mean = sum / n
+        val variance = (sumSq / n - mean * mean).coerceAtLeast(0.0)
+        return FrameStats(
+            mean = mean.toFloat(),
+            std = sqrt(variance).toFloat(),
+            saturation = (satSum / n).toFloat(),
+            detail = (detailSum / n).toFloat()
+        )
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Media
     // ---------------------------------------------------------------------------------------------
 
@@ -328,7 +503,12 @@ class EditorController(
             }
         }
         _selectedClipId.value = imported.firstOrNull()?.clip?.id
-        _status.value = EditorStatus.Idle
+        val skipped = uris.size - imported.size
+        _status.value = if (skipped > 0) {
+            EditorStatus.Error("Imported ${imported.size} of ${uris.size} item(s); $skipped could not be read")
+        } else {
+            EditorStatus.Idle
+        }
     }
 
     suspend fun extractAudio(videoClipId: String) {
@@ -558,6 +738,9 @@ class EditorController(
     val currentProjectId: String? get() = openedProjectId
 
     private companion object {
+        /** `uEffectIds[4]` in the shader and the native effect stack both hold four entries. */
+        const val MAX_EFFECTS = 4
+
         const val TAG = "EditorController"
     }
 }

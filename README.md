@@ -37,10 +37,17 @@ no simulated rendering — if a capability is missing on the device, the app say
 * **Timeline** — 4 track types (video, overlay, text, audio), drag to move, trim handles, split at the
   playhead, duplicate, delete, snapping to clip edges and the playhead, pinch zoom, filmstrip thumbnails,
   waveform strips, add-track from the clip menu.
-* **Colour** — 11 cinematic filter presets plus Original, brightness / contrast / saturation / exposure / temperature / tint,
-  vignette, sharpen, blur, and a 15 GPU effects (film grain, scanlines, glitch, bloom, light leak, VHS, …), up to 4 stacked per clip, with per-effect intensity.
-* **Motion** — per-clip in/out animations (11 types), boundary transitions (fade, slides, zoom, wipe, iris), speed
+* **Colour** — 26 filter presets plus Original (cinematic, teal & orange, noir, sepia, pastel, food, sky,
+  neon night, sunset, iced, fade, HDR, clays and more), brightness / contrast / saturation / exposure /
+  temperature / tint, vignette, sharpen, blur.
+* **Effects** — 23 GPU effects (film grain, scanlines, glitch, bloom, light leak, VHS, snow, zoom blur,
+  blur, pixelate, neon, halftone, tilt shift, old film, heat wave, spotlight, …), up to 4 stacked per clip
+  with per-effect intensity and a clear message when the stack is full.
+* **Motion** — per-clip in/out animations (18 types incl. shake, wobble, bounce, spin, flip and glitch),
+  boundary transitions (10 types: fade, slides, zoom, wipe, iris, glitch cut, blur dissolve), speed
   from 0.25× to 4× with pitch-corrected audio, freeze frame.
+* **Pro tools** — copy / paste a clip's look, apply one look to every clip, one-tap auto enhance measured
+  from a real frame (exposure, contrast, saturation, detail), send a clip to the overlay track, detach audio.
 * **Composition** — crop, rotate, scale, chroma key (key colour, similarity, smoothness, spill), and
   picture-in-picture for overlay clips.
 * **Audio** — per-clip volume, fades, mute, master volume, extracted audio tracks, imported music, recorded
@@ -108,8 +115,11 @@ kernel weights, wipe/iris timing, timeline sampling, waveform bucketing, gain ra
 ```
 CutVideo native engine tests
 ============================
-72 checks, 0 failures
+132 checks, 0 failures
 ```
+
+The suite also asserts that every effect id, motion curve and transition declared in the native enums is
+reachable and ends in a fully visible state, so the Kotlin and C++ implementations cannot drift apart.
 
 ## Honest limitations
 
@@ -120,4 +130,8 @@ CutVideo native engine tests
 * **Reversed clips** export forward, and the export screen warns about it.
 * 1440p/4K exports depend on the device encoder; the preflight check warns before you start.
 * Hardware effects can be disabled in Settings if a device's GL driver misbehaves; the preview then uses
-  the CPU look path.
+  the CPU look path. If the look shader itself fails to build on a driver, the renderer falls back to a
+  pass-through blit so preview and export never turn black.
+* **Auto enhance** analyses one frame per clip (mean/std/colourfulness) — it is adaptive colour grading,
+  not scene or face detection.
+* Exports retry once with H.264 when the device's H.265 encoder fails; the export screen reports the swap.

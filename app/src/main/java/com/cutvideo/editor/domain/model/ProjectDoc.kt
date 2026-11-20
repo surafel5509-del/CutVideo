@@ -223,8 +223,11 @@ data class TextOutline(
 
 @Serializable
 enum class ClipAnimationType {
+    // Declaration order is part of the native contract (`AnimationType` in timeline_renderer.h),
+    // so new motions are always appended.
     NONE, FADE, ZOOM_IN, ZOOM_OUT, SLIDE_LEFT, SLIDE_RIGHT, SLIDE_UP, SLIDE_DOWN,
-    ROTATE_IN, BLUR_IN, POP, FLICKER
+    ROTATE_IN, BLUR_IN, POP, FLICKER,
+    SHAKE, WOBBLE, BOUNCE, SPIN_IN, FLIP_IN, GLITCH_IN
 }
 
 @Serializable
@@ -236,7 +239,11 @@ data class ClipAnimationSpec(
 }
 
 @Serializable
-enum class TransitionType { FADE, SLIDE_LEFT, SLIDE_UP, ZOOM, WIPE, CIRCLE }
+enum class TransitionType {
+    // Mirrors `TransitionType` in timeline_renderer.h — append only.
+    FADE, SLIDE_LEFT, SLIDE_UP, ZOOM, WIPE, CIRCLE,
+    SLIDE_RIGHT, SLIDE_DOWN, GLITCH, BLUR
+}
 
 @Serializable
 data class TransitionSpec(val type: TransitionType = TransitionType.FADE, val durationUs: Long = 600_000L)

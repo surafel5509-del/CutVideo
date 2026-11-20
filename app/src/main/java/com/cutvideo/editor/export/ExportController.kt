@@ -7,6 +7,7 @@ import com.cutvideo.editor.data.db.ExportEntity
 import com.cutvideo.editor.data.repository.ExportRepository
 import com.cutvideo.editor.domain.export.ExportSettings
 import com.cutvideo.editor.domain.export.ExportState
+import com.cutvideo.editor.domain.export.VideoCodec
 import com.cutvideo.editor.domain.model.ProjectDoc
 import com.cutvideo.editor.media.ThumbnailStore
 import com.cutvideo.editor.nativebridge.NativeEngine
@@ -76,18 +77,57 @@ class ExportController(
 
     private suspend fun run(doc: ProjectDoc, settings: ExportSettings) {
         ExportService.start(context)
+        try {
+            var effective = settings
+            var attempt = 1
+            while (true) {
+                try {
+                    renderOnce(doc, effective)
+                    return
+                } catch (e: ExportException) {
+                    // Some devices advertise an H.265 encoder that fails once it is actually driven.
+                    // Retry once with H.264 instead of failing the export outright.
+                    if (attempt == 1 && effective.codec == VideoCodec.H265 && looksLikeEncoderFailure(e)) {
+                        attempt = 2
+                        effective = effective.copy(codec = VideoCodec.H264, bitrateOverride = null)
+                        _warnings.value = (_warnings.value + "H.265 failed on this device — exported with H.264 instead")
+                            .distinct()
+                        _state.value = ExportState.Preparing("H.264 encoder selected, retrying…")
+                        continue
+                    }
+                    throw e
+                }
+            }
+        } catch (cancel: CancellationException) {
+            _state.value = ExportState.Cancelled
+        } catch (e: ExportException) {
+            Log.e(TAG, "export failed", e)
+            _state.value = ExportState.Failed(e.message ?: "Export failed", e)
+        } catch (o: OutOfMemoryError) {
+            Log.e(TAG, "export ran out of memory", o)
+            _state.value = ExportState.Failed(
+                "The device ran out of memory while rendering. Try a lower resolution or a shorter clip."
+            )
+        } catch (t: Throwable) {
+            Log.e(TAG, "unexpected export failure", t)
+            _state.value = ExportState.Failed(t.message ?: "Unexpected export error", t)
+        } finally {
+            exporter = null
+            ExportService.stop(context)
+        }
+    }
+
+    /** A single render pass. Throws so [run] can decide whether a retry is worthwhile. */
+    private suspend fun renderOnce(doc: ProjectDoc, settings: ExportSettings) {
         val runExporter = TransformerExporter(context, nativeEngine, scope)
         exporter = runExporter
-        var outputFile: File? = null
+        _state.value = ExportState.Preparing("Preparing the timeline…")
+        val plan = withContext(Dispatchers.Default) { runExporter.buildPlan(doc, settings) }
+        _warnings.value = plan.warnings
+
+        val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val file = File(dir, "cutvideo_${System.currentTimeMillis()}.mp4")
         try {
-            _state.value = ExportState.Preparing("Preparing the timeline…")
-            val plan = withContext(Dispatchers.Default) { runExporter.buildPlan(doc, settings) }
-            _warnings.value = plan.warnings
-
-            val dir = File(context.cacheDir, "exports").apply { mkdirs() }
-            val file = File(dir, "cutvideo_${System.currentTimeMillis()}.mp4")
-            outputFile = file
-
             val startedAt = System.currentTimeMillis()
             _state.value = ExportState.Running(0f, null, null, "Rendering with Media3 Transformer")
 
@@ -109,17 +149,15 @@ class ExportController(
             _state.value = ExportState.Running(0.99f, null, null, "Saving to the gallery")
             val saved = MediaStoreSaver.publish(context, result.outputFile, doc.name)
             if (saved == null) {
-                _state.value = ExportState.Failed(
+                throw ExportException(
                     "The video was rendered but could not be saved to the gallery. " +
                         "Check that CutVideo has storage access."
                 )
-                return
             }
 
-            val id = UUID.randomUUID().toString()
             exportRepository.add(
                 ExportEntity(
-                    id = id,
+                    id = UUID.randomUUID().toString(),
                     projectId = doc.id,
                     projectName = doc.name,
                     filePath = saved.displayPath,
@@ -136,20 +174,16 @@ class ExportController(
                 )
             )
             _state.value = ExportState.Success(saved.displayPath, saved.uri.toString(), saved.sizeBytes)
-        } catch (cancel: CancellationException) {
-            _state.value = ExportState.Cancelled
-            outputFile?.delete()
-        } catch (e: ExportException) {
-            Log.e(TAG, "export failed", e)
-            _state.value = ExportState.Failed(e.message ?: "Export failed", e)
-            outputFile?.delete()
         } catch (t: Throwable) {
-            Log.e(TAG, "unexpected export failure", t)
-            _state.value = ExportState.Failed(t.message ?: "Unexpected export error", t)
-            outputFile?.delete()
-        } finally {
-            exporter = null
-            ExportService.stop(context)
+            runCatching { file.delete() }
+            throw t
+        }
+    }
+
+    private fun looksLikeEncoderFailure(e: ExportException): Boolean {
+        val text = (e.message ?: "") + " " + e.errorCodeName
+        return listOf("encoder", "codec", "muxer", "init", "renderer", "unsupported").any {
+            text.contains(it, ignoreCase = true)
         }
     }
 
