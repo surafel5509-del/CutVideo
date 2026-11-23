@@ -16,6 +16,9 @@ import kotlinx.coroutines.withContext
 
 data class ImportedMedia(val asset: MediaAssetEntity, val clip: Clip)
 
+/** Fills the Revert tool's import-time snapshot the first time a clip is created. */
+internal fun Clip.withOriginal(): Clip = if (original != null) this else copy(original = com.cutvideo.editor.domain.model.ClipOriginal.of(this))
+
 /**
  * Turns user-picked URIs into persisted media assets and real timeline clips.
  *
@@ -76,7 +79,7 @@ class MediaImporter(
                 sourceDurationUs = info.durationUs,
                 muted = false,
                 volume = 1f
-            )
+            ).withOriginal()
             val asset = MediaAssetEntity(
                 id = assetId,
                 projectId = projectId,
@@ -101,6 +104,54 @@ class MediaImporter(
             results += ImportedMedia(asset, clip)
         }
         results
+    }
+
+    /**
+     * Imports a static image (photo or transparent PNG) as an overlay layer. Images are stills:
+     * the clip keeps a visible duration on the timeline and renders as a real layer in the
+     * preview. Compositing image overlays into the exported file follows the app's documented
+     * PiP/overlay limitation.
+     */
+    suspend fun importImage(
+        uri: Uri,
+        projectId: String,
+        insertAtUs: Long = 0L,
+        durationUs: Long = 5_000_000L
+    ): ImportedMedia? = withContext(Dispatchers.IO) {
+        persistPermission(uri)
+        val info = MediaProbe.probeImage(context, uri).getOrNull() ?: return@withContext null
+        val assetId = Ids.media()
+        val clipDurationUs = durationUs.coerceAtLeast(250_000L)
+        val clip = Clip(
+            id = Ids.clip(),
+            trackType = TrackType.OVERLAY,
+            name = info.displayName,
+            mediaId = assetId,
+            uri = info.uri.toString(),
+            mimeType = info.mimeType,
+            startUs = insertAtUs.coerceAtLeast(0L),
+            durationUs = clipDurationUs,
+            sourceInUs = 0L,
+            sourceDurationUs = clipDurationUs,
+            isImage = true
+        ).withOriginal()
+        val asset = MediaAssetEntity(
+            id = assetId,
+            projectId = projectId,
+            uri = info.uri.toString(),
+            displayName = info.displayName,
+            mimeType = info.mimeType,
+            kind = MediaKind.IMAGE.name,
+            durationUs = 0L,
+            width = info.width,
+            height = info.height,
+            sizeBytes = info.sizeBytes,
+            hasAudio = false,
+            waveformPath = null,
+            addedAt = System.currentTimeMillis()
+        )
+        mediaRepository.add(asset)
+        ImportedMedia(asset, clip)
     }
 
     /** Extracts audio from a video clip into its own audio-track clip. */

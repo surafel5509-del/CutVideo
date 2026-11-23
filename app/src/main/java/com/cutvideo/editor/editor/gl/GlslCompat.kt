@@ -63,7 +63,8 @@ object GlslCompat {
                             converted = raw.replaceFirst(Regex("""^(\s*)out\s"""), "$1" + (if (fragment) "varying " else "varying "))
                     }
                     if (fragment) {
-                        converted = converted.replace(Regex("""\btexture\s*\(""") { mr -> "texture2D(" }
+                        converted = converted
+                            .replace(Regex("""\btexture\s*\("""), "texture2D(")
                             .replace(Regex("""\bfragColor\b"""), "gl_FragColor")
                     }
                     out.append(converted).append('\n')

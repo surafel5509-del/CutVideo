@@ -434,6 +434,256 @@ class EditorController(
         return true
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Keyframes, masks and revert (CapCut-style tools)
+    // -------------------------------------------------------------------------------------------------------------
+
+    /**
+     * Adds (or replaces) a keyframe for [property] at clip-local [timeUs], seeded with the value
+     * currently visible there so the edit never jumps.
+     */
+    fun addKeyframe(clipId: String, property: com.cutvideo.editor.domain.model.KeyframeProperty, timeUs: Long) {
+        mutate("Add keyframe") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val existing = clip.keyframeTrack(property)
+                val current = KeyframeEngine.evaluate(existing, timeUs, baseValue(clip, property))
+                val key = com.cutvideo.editor.domain.model.Keyframe(
+                    timeUs = timeUs.coerceIn(0L, clip.durationUs),
+                    value = current.coerceIn(property.minValue, property.maxValue)
+                )
+                val track = existing?.let { KeyframeEngine.withKeyframe(it, key) }
+                    ?: com.cutvideo.editor.domain.model.KeyframeTrack(property, listOf(key))
+                clip.copy(keyframes = clip.keyframes.filterNot { it.property == property } + track)
+            }
+        }
+    }
+
+    fun deleteKeyframe(clipId: String, property: com.cutvideo.editor.domain.model.KeyframeProperty, timeUs: Long) {
+        mutate("Delete keyframe") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val track = clip.keyframeTrack(property) ?: return@updateClip clip
+                val next = KeyframeEngine.withoutKeyframe(track, timeUs)
+                clip.copy(
+                    keyframes = if (next.isEmpty) {
+                        clip.keyframes.filterNot { it.property == property }
+                    } else {
+                        clip.keyframes.filterNot { it.property == property } + next
+                    }
+                )
+            }
+        }
+    }
+
+    fun moveKeyframe(
+        clipId: String,
+        property: com.cutvideo.editor.domain.model.KeyframeProperty,
+        fromUs: Long,
+        toUs: Long,
+        newValue: Float? = null
+    ) {
+        mutate("Move keyframe") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val track = clip.keyframeTrack(property) ?: return@updateClip clip
+                clip.copy(
+                    keyframes = clip.keyframes.filterNot { it.property == property } +
+                        KeyframeEngine.moveKeyframe(track, fromUs, toUs, newValue)
+                )
+            }
+        }
+    }
+
+    fun setKeyframeInterpolation(
+        clipId: String,
+        property: com.cutvideo.editor.domain.model.KeyframeProperty,
+        timeUs: Long,
+        interpolation: com.cutvideo.editor.domain.model.KeyframeInterpolation
+    ) {
+        mutate("Set interpolation") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val track = clip.keyframeTrack(property) ?: return@updateClip clip
+                clip.copy(
+                    keyframes = clip.keyframes.filterNot { it.property == property } +
+                        KeyframeEngine.withInterpolation(track, timeUs, interpolation)
+                )
+            }
+        }
+    }
+
+    fun setKeyframeHandles(
+        clipId: String,
+        property: com.cutvideo.editor.domain.model.KeyframeProperty,
+        timeUs: Long,
+        inX: Float,
+        inY: Float,
+        outX: Float,
+        outY: Float
+    ) {
+        mutateLive {
+            TimelineManager.updateClip(it, clipId) { clip ->
+                val track = clip.keyframeTrack(property) ?: return@updateClip clip
+                clip.copy(
+                    keyframes = clip.keyframes.filterNot { kt -> kt.property == property } +
+                        KeyframeEngine.withHandles(track, timeUs, inX, inY, outX, outY)
+                )
+            }
+        }
+    }
+
+    fun clearKeyframes(clipId: String, property: com.cutvideo.editor.domain.model.KeyframeProperty? = null) {
+        mutate("Clear keyframes") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(
+                    keyframes = if (property == null) emptyList()
+                    else clip.keyframes.filterNot { it.property == property }
+                )
+            }
+        }
+    }
+
+    /** The value a property shows when no keyframes are set (the clip's static state). */
+    fun baseValue(clip: Clip, property: com.cutvideo.editor.domain.model.KeyframeProperty): Float =
+        when (property) {
+            com.cutvideo.editor.domain.model.KeyframeProperty.POSITION_X -> clip.transform.offsetXFrac
+            com.cutvideo.editor.domain.model.KeyframeProperty.POSITION_Y -> clip.transform.offsetYFrac
+            com.cutvideo.editor.domain.model.KeyframeProperty.SCALE -> clip.transform.scaleX
+            com.cutvideo.editor.domain.model.KeyframeProperty.ROTATION -> clip.transform.rotationDegrees
+            com.cutvideo.editor.domain.model.KeyframeProperty.OPACITY -> 1f
+            com.cutvideo.editor.domain.model.KeyframeProperty.VOLUME -> clip.effectiveVolume
+            com.cutvideo.editor.domain.model.KeyframeProperty.BLUR -> clip.blur
+            com.cutvideo.editor.domain.model.KeyframeProperty.SPEED -> clip.speed
+            com.cutvideo.editor.domain.model.KeyframeProperty.GLOW -> 0f
+            com.cutvideo.editor.domain.model.KeyframeProperty.EFFECT_INTENSITY ->
+                clip.effects.firstOrNull()?.intensity ?: 0.5f
+            com.cutvideo.editor.domain.model.KeyframeProperty.CROP_LEFT -> clip.transform.cropLeft
+            com.cutvideo.editor.domain.model.KeyframeProperty.CROP_RIGHT -> clip.transform.cropRight
+            com.cutvideo.editor.domain.model.KeyframeProperty.CROP_TOP -> clip.transform.cropTop
+            com.cutvideo.editor.domain.model.KeyframeProperty.CROP_BOTTOM -> clip.transform.cropBottom
+            else -> clip.masks.firstOrNull()?.let { mask ->
+                when (property) {
+                    com.cutvideo.editor.domain.model.KeyframeProperty.MASK_X -> mask.xFrac
+                    com.cutvideo.editor.domain.model.KeyframeProperty.MASK_Y -> mask.yFrac
+                    com.cutvideo.editor.domain.model.KeyframeProperty.MASK_SCALE -> mask.scale
+                    com.cutvideo.editor.domain.model.KeyframeProperty.MASK_ROTATION -> mask.rotationDegrees
+                    com.cutvideo.editor.domain.model.KeyframeProperty.MASK_FEATHER -> mask.feather
+                    com.cutvideo.editor.domain.model.KeyframeProperty.MASK_OPACITY -> mask.opacity
+                    com.cutvideo.editor.domain.model.KeyframeProperty.MASK_EXPANSION -> mask.expansion
+                    else -> property.defaultValue
+                }
+            } ?: property.defaultValue
+        }
+
+    fun addMask(clipId: String, type: com.cutvideo.editor.domain.model.MaskType): String? {
+        var newId: String? = null
+        mutate("Add mask") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                if (clip.masks.size >= 2) return@updateClip clip // shader supports two; say so in UI
+                val mask = com.cutvideo.editor.domain.model.MaskSpec(type = type)
+                newId = mask.id
+                clip.copy(masks = clip.masks + mask)
+            }
+        }
+        return newId
+    }
+
+    fun updateMask(
+        clipId: String,
+        maskId: String,
+        live: Boolean = false,
+        block: (com.cutvideo.editor.domain.model.MaskSpec) -> com.cutvideo.editor.domain.model.MaskSpec
+    ) {
+        val update: (ProjectDoc) -> ProjectDoc = { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(masks = clip.masks.map { if (it.id == maskId) block(it) else it })
+            }
+        }
+        if (live) mutateLive(update) else mutate("Edit mask", update)
+    }
+
+    fun deleteMask(clipId: String, maskId: String) {
+        mutate("Delete mask") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(masks = clip.masks.filterNot { it.id == maskId })
+            }
+        }
+    }
+
+    /** Adds a freehand stroke to the clip's freehand mask (creates the mask when missing). */
+    fun addMaskStroke(clipId: String, stroke: List<com.cutvideo.editor.domain.model.MaskPoint>) {
+        mutateLive {
+            TimelineManager.updateClip(it, clipId) { clip ->
+                val existing = clip.masks.firstOrNull { m -> m.type == com.cutvideo.editor.domain.model.MaskType.FREEHAND }
+                if (existing != null) {
+                    clip.copy(masks = clip.masks.map { m ->
+                        if (m.id == existing.id) m.copy(strokes = m.strokes + stroke) else m
+                    })
+                } else {
+                    val mask = com.cutvideo.editor.domain.model.MaskSpec(
+                        type = com.cutvideo.editor.domain.model.MaskType.FREEHAND,
+                        strokes = listOf(stroke)
+                    )
+                    clip.copy(masks = (clip.masks + mask).take(2))
+                }
+            }
+        }
+    }
+
+    /** Restores one property group of a clip from its import-time snapshot. */
+    fun revertProperty(clipId: String, group: com.cutvideo.editor.domain.model.RevertGroup) {
+        mutate("Revert ${group.label}") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val original = clip.original ?: return@updateClip clip
+                when (group) {
+                    com.cutvideo.editor.domain.model.RevertGroup.TRANSFORM -> clip.copy(transform = original.transform)
+                    com.cutvideo.editor.domain.model.RevertGroup.COLOR -> clip.copy(
+                        adjust = original.adjust,
+                        filter = original.filter
+                    )
+                    com.cutvideo.editor.domain.model.RevertGroup.EFFECTS -> clip.copy(
+                        effects = original.effects,
+                        blur = original.blur
+                    )
+                    com.cutvideo.editor.domain.model.RevertGroup.MASKS -> clip.copy(masks = original.masks)
+                    com.cutvideo.editor.domain.model.RevertGroup.KEYFRAMES -> clip.copy(keyframes = original.keyframes)
+                    com.cutvideo.editor.domain.model.RevertGroup.AUDIO -> clip.copy(
+                        volume = original.volume,
+                        muted = original.muted,
+                        fadeInUs = original.fadeInUs,
+                        fadeOutUs = original.fadeOutUs
+                    )
+                    com.cutvideo.editor.domain.model.RevertGroup.SPEED -> clip.copy(speed = original.speed)
+                    com.cutvideo.editor.domain.model.RevertGroup.CHROMA -> clip.copy(chroma = original.chroma)
+                }
+            }
+        }
+    }
+
+    /**
+     * Restores the whole clip to its import-time state. The imported media file is never touched.
+     * Callers should confirm with the user first (see the clip menu dialog).
+     */
+    fun revertClip(clipId: String) {
+        mutate("Revert clip") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val original = clip.original ?: return@updateClip clip
+                clip.copy(
+                    speed = original.speed,
+                    volume = original.volume,
+                    muted = original.muted,
+                    fadeInUs = original.fadeInUs,
+                    fadeOutUs = original.fadeOutUs,
+                    transform = original.transform,
+                    adjust = original.adjust,
+                    filter = original.filter,
+                    effects = original.effects,
+                    blur = original.blur,
+                    chroma = original.chroma,
+                    masks = original.masks,
+                    keyframes = original.keyframes
+                )
+            }
+        }
+    }
+
     private data class FrameStats(val mean: Float, val std: Float, val saturation: Float, val detail: Float)
 
     /** Samples up to 48x48 pixels: cheap enough to run on the main thread for a thumbnail. */

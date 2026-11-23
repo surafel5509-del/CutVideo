@@ -88,7 +88,17 @@ class PreviewController(
             activeClipForLook ?: Clip(id = "placeholder", trackType = TrackType.VIDEO)
         },
         aspect = aspect,
-        applyAnimation = false
+        applyAnimation = false,
+        // Media3 hands the effect media-timeline presentation time; convert to clip-local time so
+        // mask/effect keyframes sample exactly where the playhead is (same math as the export).
+        localTimeProvider = { presentationTimeUs ->
+            val clip = activeClipForLook
+            if (clip != null && clip.speed > 0f) {
+                ((presentationTimeUs - clip.sourceInUs) / clip.speed).coerceAtLeast(0L)
+            } else {
+                presentationTimeUs
+            }
+        }
     )
 
     private val musicPlayer: ExoPlayer = ExoPlayer.Builder(appContext).build()
@@ -305,8 +315,42 @@ class PreviewController(
                     )
                     syncFollowers(position)
                 }
+                applyLiveKeyframes()
             }
         }
+    }
+
+    /**
+     * Applies the clip-local SPEED and VOLUME keyframe curves to the players at the current
+     * position. Speed ramps update `playbackParameters` continuously (the export applies the same
+     * curve exactly through its `SpeedProvider`); volume keyframes scale the clip volume.
+     */
+    private fun applyLiveKeyframes() {
+        val clip = videoClips.getOrNull(player.currentMediaItemIndex) ?: return
+        val localUs = player.currentPosition * 1000L
+        val speedTrack = clip.keyframeTrack(com.cutvideo.editor.domain.model.KeyframeProperty.SPEED)
+        if (speedTrack != null) {
+            val speed = com.cutvideo.editor.editor.KeyframeEngine
+                .evaluate(speedTrack, localUs, clip.speed)
+                .coerceIn(0.25f, 4f)
+            if (abs(player.playbackParameters.speed - speed) > 0.01f) {
+                player.playbackParameters = PlaybackParameters(speed)
+            }
+        }
+        val volumeTrack = clip.keyframeTrack(com.cutvideo.editor.domain.model.KeyframeProperty.VOLUME)
+        if (volumeTrack != null || player.volume != expectedVolume(clip, localUs)) {
+            player.volume = expectedVolume(clip, localUs)
+        }
+    }
+
+    private fun expectedVolume(clip: Clip, localUs: Long): Float {
+        if (muteOriginal) return 0f
+        val kf = com.cutvideo.editor.editor.KeyframeEngine.evaluate(
+            clip.keyframeTrack(com.cutvideo.editor.domain.model.KeyframeProperty.VOLUME),
+            localUs,
+            1f
+        )
+        return (clip.effectiveVolume * kf).coerceIn(0f, 1f)
     }
 
     /** Keeps the audio and overlay followers glued to the main timeline. */

@@ -9,4 +9,5 @@ object Ids {
     fun track(): String = newId("trk")
     fun clip(): String = newId("clp")
     fun media(): String = newId("med")
+    fun mask(): String = newId("msk")
 }

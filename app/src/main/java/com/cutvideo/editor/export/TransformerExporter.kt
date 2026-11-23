@@ -117,6 +117,9 @@ class TransformerExporter(
                 "Picture-in-picture overlays are previewed live but are not flattened into this export yet"
             )
         }
+        if (doc.overlayClips().any { it.isImage }) {
+            warnings.add("Image layers render in the preview but are not composited into this export")
+        }
 
         var compositionCursorUs = 0L
         val items = ArrayList<EditedMediaItem>(videoClips.size)
@@ -223,21 +226,26 @@ class TransformerExporter(
         )
 
         val audioProcessors = ArrayList<AudioProcessor>()
-        if (!clip.muted && !GainAudioProcessor.isNoOp(clip.effectiveVolume, clip.fadeInUs, clip.fadeOutUs, 0L)) {
+        val volumeTrack = clip.keyframeTrack(com.cutvideo.editor.domain.model.KeyframeProperty.VOLUME)
+        if (!clip.muted &&
+            (!GainAudioProcessor.isNoOp(clip.effectiveVolume, clip.fadeInUs, clip.fadeOutUs, 0L) ||
+                volumeTrack != null)
+        ) {
             audioProcessors += GainAudioProcessor(
                 leadSilenceUs = 0L,
                 gain = clip.effectiveVolume,
                 fadeInUs = clip.fadeInUs,
                 fadeOutUs = clip.fadeOutUs,
                 clipDurationUs = clip.durationUs,
-                nativeEngine = nativeEngine
+                nativeEngine = nativeEngine,
+                volumeKeyframes = volumeTrack?.keyframes
             )
         }
 
         val builder = EditedMediaItem.Builder(mediaItemFor(clip))
             .setEffects(Effects(audioProcessors, videoEffects))
             .setFrameRate(settings.frameRate.fps)
-        if (clip.speed != 1f && clip.speed > 0f) builder.setSpeed(FixedSpeedProvider(clip.speed))
+        speedProviderFor(clip)?.let { builder.setSpeed(it) }
         if (clip.muted) builder.setRemoveAudio(true)
 
         if (clip.uri.isBlank()) warnings.add("Clip '${clip.name}' has no media and was skipped")
@@ -267,22 +275,22 @@ class TransformerExporter(
             if (leadSilence > 0L) builder.addGap(leadSilence)
             val processors = ArrayList<AudioProcessor>()
             val gain = clip.effectiveVolume * trackVolume
-            if (!GainAudioProcessor.isNoOp(gain, clip.fadeInUs, clip.fadeOutUs, 0L)) {
+            val volumeTrack = clip.keyframeTrack(com.cutvideo.editor.domain.model.KeyframeProperty.VOLUME)
+            if (!GainAudioProcessor.isNoOp(gain, clip.fadeInUs, clip.fadeOutUs, 0L) || volumeTrack != null) {
                 processors += GainAudioProcessor(
                     leadSilenceUs = 0L,
                     gain = gain.coerceIn(0f, 2f),
                     fadeInUs = clip.fadeInUs,
                     fadeOutUs = clip.fadeOutUs,
                     clipDurationUs = clip.durationUs,
-                    nativeEngine = nativeEngine
+                    nativeEngine = nativeEngine,
+                    volumeKeyframes = volumeTrack?.keyframes
                 )
             }
             val itemBuilder = EditedMediaItem.Builder(mediaItemFor(clip))
                 .setEffects(Effects(processors, listOf()))
                 .setFrameRate(settings.frameRate.fps)
-            if (clip.speed != 1f && clip.speed > 0f) {
-                itemBuilder.setSpeed(FixedSpeedProvider(clip.speed))
-            }
+            speedProviderFor(clip)?.let { itemBuilder.setSpeed(it) }
             builder.addItem(itemBuilder.build())
             cursorUs = clip.endUs
         }
@@ -482,13 +490,56 @@ class TransformerExporter(
     }
 
     /**
-     * Constant speed handed to `EditedMediaItem.Builder#setSpeed`, which adjusts both the video
-     * timestamps and the audio so the item lands on the timeline at the duration the document
-     * expects. This is the *only* place speed is applied — never alongside a SpeedChangeEffect.
+     * The speed model for one clip, or null when the clip runs at plain 1× (no provider needed).
+     * A SPEED keyframe track becomes a real [SpeedProvider] so speed ramps are exact in the export;
+     * otherwise a constant provider is used. This is the *only* place speed is applied — never
+     * alongside a SpeedChangeEffect (Media3 rejects that combination outright).
      */
+    private fun speedProviderFor(clip: Clip): SpeedProvider? {
+        if (clip.speed == 1f && clip.keyframeTrack(com.cutvideo.editor.domain.model.KeyframeProperty.SPEED) == null) {
+            return null
+        }
+        val track = clip.keyframeTrack(com.cutvideo.editor.domain.model.KeyframeProperty.SPEED)
+            ?: return FixedSpeedProvider(clip.speed.coerceIn(0.05f, 8f))
+        return RampedSpeedProvider(track, clip.sourceSpanUs, clip.durationUs, clip.speed)
+    }
+
+    /** Constant speed handed to `EditedMediaItem.Builder#setSpeed`. */
     private class FixedSpeedProvider(private val speed: Float) : SpeedProvider {
         override fun getSpeed(timeUs: Long): Float = speed
         override fun getNextSpeedChangeTimeUs(timeUs: Long): Long = C.TIME_UNSET
+    }
+
+    /**
+     * Piecewise speed ramp backed by a SPEED [com.cutvideo.editor.domain.model.KeyframeTrack].
+     *
+     * Media3 asks for speed as a function of *input media* time while the curve is defined over the
+     * clip's presentation timeline, so times are mapped through the clip's source span (exact for
+     * constant speed, a close piecewise-linear approximation while ramping — the same curve the
+     * preview follows).
+     */
+    private class RampedSpeedProvider(
+        private val track: com.cutvideo.editor.domain.model.KeyframeTrack,
+        private val sourceSpanUs: Long,
+        private val presentationUs: Long,
+        private val baseSpeed: Float
+    ) : SpeedProvider {
+
+        private fun toLocal(mediaUs: Long): Long =
+            if (sourceSpanUs > 0L) mediaUs * presentationUs / sourceSpanUs else mediaUs
+
+        private fun toMedia(localUs: Long): Long =
+            if (presentationUs > 0L) localUs * sourceSpanUs / presentationUs else localUs
+
+        override fun getSpeed(timeUs: Long): Float =
+            com.cutvideo.editor.editor.KeyframeEngine.evaluate(track, toLocal(timeUs), baseSpeed)
+                .coerceIn(0.05f, 8f)
+
+        override fun getNextSpeedChangeTimeUs(timeUs: Long): Long {
+            val local = toLocal(timeUs)
+            val next = track.sorted.firstOrNull { it.timeUs > local } ?: return C.TIME_UNSET
+            return toMedia(next.timeUs).coerceAtLeast(timeUs + 1)
+        }
     }
 
     private companion object {

@@ -93,4 +93,40 @@ object MediaProbe {
             else -> "video/mp4"
         }
     }
+
+    /**
+     * Probes a static image (photo or transparent PNG). Images are stills, so [MediaInfo.durationUs]
+     * is 0 and the clip layer supplies the on-screen duration.
+     */
+    fun probeImage(context: Context, uri: Uri): Result<MediaInfo> = runCatching {
+        val resolver = context.contentResolver
+        val mime = resolver.getType(uri) ?: "image/png"
+        var displayName = uri.lastPathSegment?.substringAfterLast('/') ?: "image"
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex >= 0) cursor.getString(nameIndex)?.let { displayName = it }
+                }
+            }
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use {
+            android.graphics.BitmapFactory.decodeStream(it, null, bounds)
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw IllegalArgumentException("Unsupported image: ${displayName}")
+        }
+        MediaInfo(
+            uri = uri,
+            displayName = displayName,
+            mimeType = mime,
+            durationUs = 0L,
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            sizeBytes = 0L,
+            hasAudio = false,
+            hasVideo = true,
+            kind = MediaKind.IMAGE
+        )
+    }.onFailure { Log.w(TAG, "image probe failed for $uri", it) }
 }

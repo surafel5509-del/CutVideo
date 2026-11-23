@@ -3,6 +3,7 @@ package com.cutvideo.editor.editor
 import com.cutvideo.editor.domain.model.AnimationFrame
 import com.cutvideo.editor.domain.model.Clip
 import com.cutvideo.editor.domain.model.ClipAnimationType
+import com.cutvideo.editor.domain.model.KeyframeProperty
 import com.cutvideo.editor.domain.model.TransitionType
 import kotlin.math.abs
 import kotlin.math.cos
@@ -156,6 +157,29 @@ object AnimationEngine {
             rotationDegrees = rotation,
             blurRadiusPx = blur,
             wipe = wipe.coerceIn(0f, 1f)
+        ).withKeyframes(clip, timelineUs)
+    }
+
+    /**
+     * Merges the keyframed transform/opacity values into the animation frame. These four
+     * properties are owned by [compose] (the preview applies them through `graphicsLayer`, the
+     * export through the shader transform uniforms), so no other layer should re-apply them.
+     * Blur / mask / effect / volume keyframes are evaluated by their own owners.
+     */
+    private fun AnimationFrame.withKeyframes(clip: Clip, timelineUs: Long): AnimationFrame {
+        if (!clip.hasKeyframes) return this
+        val tracks = clip.keyframes
+        val kfScale = KeyframeEngine.valueOr(KeyframeProperty.SCALE, tracks, timelineUs)
+        val kfX = KeyframeEngine.valueOr(KeyframeProperty.POSITION_X, tracks, timelineUs)
+        val kfY = KeyframeEngine.valueOr(KeyframeProperty.POSITION_Y, tracks, timelineUs)
+        val kfRot = KeyframeEngine.valueOr(KeyframeProperty.ROTATION, tracks, timelineUs)
+        val kfOpacity = KeyframeEngine.valueOr(KeyframeProperty.OPACITY, tracks, timelineUs)
+        return copy(
+            alpha = (alpha * kfOpacity).coerceIn(0f, 1f),
+            scale = scale * kfScale,
+            translateX = translateX + kfX,
+            translateY = translateY + kfY,
+            rotationDegrees = rotationDegrees + kfRot
         )
     }
 

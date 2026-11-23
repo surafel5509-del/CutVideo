@@ -52,15 +52,20 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.FilterVintage
 import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material.icons.rounded.CropFree
+import androidx.compose.material.icons.rounded.FilterCenterFocus
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PictureInPictureAlt
 import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.ShowChart
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.Timeline
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.AlertDialog
@@ -125,6 +130,8 @@ fun EditorScreen(
     onOpenTextEditor: () -> Unit,
     onOpenEffectsLibrary: () -> Unit,
     onOpenAudioEditor: () -> Unit,
+    onOpenCutout: () -> Unit = {},
+    onPickImageLayer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val doc by vm.doc.collectAsStateWithLifecycle()
@@ -301,7 +308,9 @@ fun EditorScreen(
                         onOpenTextEditor = onOpenTextEditor,
                         onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
                         onImportSrt = { srtImporter.launch(arrayOf("application/x-subrip", "text/plain", "*/*")) },
-                        onExportSrt = { srtExporter.launch("cutvideo-subtitles.srt") }
+                        onExportSrt = { srtExporter.launch("cutvideo-subtitles.srt") },
+                        onOpenCutout = onOpenCutout,
+                        onPickImageLayer = onPickImageLayer
                     )
                 }
             }
@@ -369,7 +378,12 @@ fun EditorScreen(
             onPasteStyle = { vm.pasteStyle(); clipMenu = null },
             onApplyLookToAll = { vm.applyStyleToAll(); clipMenu = null },
             onAutoEnhance = { vm.autoEnhance(); clipMenu = null },
-            onSendToOverlay = { vm.moveToOverlay(); clipMenu = null }
+            onSendToOverlay = { vm.moveToOverlay(); clipMenu = null },
+            onMask = { vm.selectTool(EditorTool.MASK); clipMenu = null },
+            onKeyframes = { vm.selectTool(EditorTool.KEYFRAME); clipMenu = null },
+            onGraph = { vm.selectTool(EditorTool.GRAPH); clipMenu = null },
+            onRevertProperty = { group -> vm.revertProperty(group) },
+            onRevertAll = { vm.revertClip() }
         )
     }
 }
@@ -503,6 +517,30 @@ private fun PreviewStage(
                             RoundedCornerShape(pipClip.pip.cornerRadiusDp.dp)
                         )
                 )
+            }
+
+            // Image layers (photos / transparent PNGs from the cutout tool) — real pixel layers.
+            doc.overlayClips().forEach { imageClip ->
+                if (imageClip.isImage && playhead in imageClip.startUs until imageClip.endUs) {
+                    val frame = AnimationEngine.compose(imageClip, playhead)
+                    val layerWidth = stageWidth * imageClip.pip.scale.coerceIn(0.15f, 3f)
+                    coil.compose.AsyncImage(
+                        model = imageClip.uri,
+                        contentDescription = imageClip.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .width(layerWidth)
+                            .graphicsLayer {
+                                translationX = imageClip.pip.offsetXFrac * stageWidth.toPx() + frame.translateX * size.width
+                                translationY = imageClip.pip.offsetYFrac * stageHeight.toPx() + frame.translateY * size.height
+                                scaleX = frame.scale
+                                scaleY = frame.scale
+                                rotationZ = frame.rotationDegrees
+                                alpha = frame.alpha
+                            }
+                    )
+                }
             }
 
             // Text / caption layers
@@ -645,7 +683,11 @@ private fun ToolRail(
         EditorTool.AUDIO to Icons.Rounded.Audiotrack,
         EditorTool.CHROMA to Icons.Rounded.AutoFixHigh,
         EditorTool.PIP to Icons.Rounded.PictureInPictureAlt,
-        EditorTool.CAPTIONS to Icons.Rounded.Subtitles
+        EditorTool.CAPTIONS to Icons.Rounded.Subtitles,
+        EditorTool.MASK to Icons.Rounded.CropFree,
+        EditorTool.KEYFRAME to Icons.Rounded.Timeline,
+        EditorTool.GRAPH to Icons.Rounded.ShowChart,
+        EditorTool.CUTOUT to Icons.Rounded.FilterCenterFocus
     )
     LazyRow(
         modifier = modifier.fillMaxWidth(),
@@ -807,8 +849,15 @@ private fun ClipContextDialog(
     onPasteStyle: () -> Unit,
     onApplyLookToAll: () -> Unit,
     onAutoEnhance: () -> Unit,
-    onSendToOverlay: () -> Unit
+    onSendToOverlay: () -> Unit,
+    onMask: () -> Unit,
+    onKeyframes: () -> Unit,
+    onGraph: () -> Unit,
+    onRevertProperty: (com.cutvideo.editor.domain.model.RevertGroup) -> Unit,
+    onRevertAll: () -> Unit
 ) {
+    var showRevert by remember { mutableStateOf(false) }
+    var confirmRevertAll by remember { mutableStateOf(false) }
     val actions = listOf(
         Triple(Icons.Rounded.ContentCut, "Split at playhead", onSplit),
         Triple(Icons.Rounded.ContentCopy, "Duplicate", onDuplicate),
@@ -829,7 +878,11 @@ private fun ClipContextDialog(
         Triple(Icons.Rounded.ContentPaste, "Paste style", onPasteStyle),
         Triple(Icons.Rounded.DoneAll, "Apply look to all clips", onApplyLookToAll),
         Triple(Icons.Rounded.AutoFixNormal, "Auto enhance", onAutoEnhance),
-        Triple(Icons.Rounded.Layers, "Send to overlay", onSendToOverlay)
+        Triple(Icons.Rounded.Layers, "Send to overlay", onSendToOverlay),
+        Triple(Icons.Rounded.CropFree, "Mask", onMask),
+        Triple(Icons.Rounded.Animation, "Keyframes", onKeyframes),
+        Triple(Icons.Rounded.ShowChart, "Graph / curves", onGraph),
+        Triple(Icons.Rounded.History, "Revert…", { showRevert = true })
     )
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -885,4 +938,83 @@ private fun ClipContextDialog(
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close", color = CutColors.TextSecondary) } }
     )
+
+    if (showRevert) {
+        AlertDialog(
+            onDismissRequest = { showRevert = false },
+            containerColor = CutColors.BackgroundElevated,
+            title = { Text("Revert “${clip.name.take(24)}”", color = CutColors.TextPrimary) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "Restores from the import-time snapshot. The original media file is never touched.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CutColors.TextTertiary
+                    )
+                    com.cutvideo.editor.domain.model.RevertGroup.entries.forEach { group ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    onRevertProperty(group)
+                                    showRevert = false
+                                    onDismiss()
+                                }
+                                .padding(vertical = 8.dp, horizontal = 6.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.History, null,
+                                tint = CutColors.TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "Revert ${group.label.lowercase()}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = CutColors.TextPrimary
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRevert = false; confirmRevertAll = true }) {
+                    Text("Revert everything", color = CutColors.Danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRevert = false }) {
+                    Text("Cancel", color = CutColors.TextSecondary)
+                }
+            }
+        )
+    }
+
+    if (confirmRevertAll) {
+        AlertDialog(
+            onDismissRequest = { confirmRevertAll = false },
+            containerColor = CutColors.BackgroundElevated,
+            title = { Text("Revert all edits?", color = CutColors.TextPrimary) },
+            text = {
+                Text(
+                    "Every change on this clip (transform, colour, effects, masks, keyframes, " +
+                        "audio, speed) goes back to how it was imported. This is undoable.",
+                    color = CutColors.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRevertAll()
+                    confirmRevertAll = false
+                    onDismiss()
+                }) { Text("Revert", color = CutColors.Danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRevertAll = false }) {
+                    Text("Keep my edits", color = CutColors.TextSecondary)
+                }
+            }
+        )
+    }
 }

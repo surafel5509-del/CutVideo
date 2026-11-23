@@ -1,5 +1,6 @@
 package com.cutvideo.editor.ui
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,6 +49,7 @@ private object Routes {
     const val MEDIA = "media"
     const val SETTINGS = "settings"
     const val EXPORTS = "exports"
+    const val CUTOUT = "cutout"
     const val PROJECT_ARG = "projectId"
     const val EDITOR = "editor/{$PROJECT_ARG}"
     const val AUDIO = "audio/{$PROJECT_ARG}"
@@ -101,6 +103,9 @@ fun CutVideoRoot(
 
     var browseTrackType by remember { mutableStateOf(TrackType.VIDEO) }
 
+    /** Pending photo for the cutout studio (URI handed between picker and screen). */
+    var cutoutSourceUri by remember { mutableStateOf<Uri?>(null) }
+
     val browseLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
@@ -111,6 +116,30 @@ fun CutVideoRoot(
                 editorVm.importMedia(uris, browseTrackType)
                 editorVm.selectTool(com.cutvideo.editor.ui.screens.editor.EditorTool.NONE)
             }
+        }
+    }
+
+    val cutoutLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                container.appContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            cutoutSourceUri = uri
+            navController.navigate(Routes.CUTOUT)
+        }
+    }
+
+    val imageLayerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val projectId = editorVm.doc.value?.id
+        if (uri != null && projectId != null) {
+            editorVm.importImageLayer(uri)
         }
     }
 
@@ -181,7 +210,9 @@ fun CutVideoRoot(
                 onExport = { navController.navigate(Routes.export(projectId)) },
                 onOpenTextEditor = { navController.navigate(Routes.text(projectId)) },
                 onOpenEffectsLibrary = { navController.navigate(Routes.effects(projectId)) },
-                onOpenAudioEditor = { navController.navigate(Routes.audio(projectId)) }
+                onOpenAudioEditor = { navController.navigate(Routes.audio(projectId)) },
+                onOpenCutout = { cutoutLauncher.launch(arrayOf("image/*")) },
+                onPickImageLayer = { imageLayerLauncher.launch(arrayOf("image/*")) }
             )
         }
 
@@ -245,6 +276,28 @@ fun CutVideoRoot(
                 onBack = { navController.popBackStack() },
                 onOpenExported = { navController.navigate(Routes.EXPORTS) }
             )
+        }
+
+        composable(Routes.CUTOUT) {
+            val source = cutoutSourceUri
+            if (source == null) {
+                navController.popBackStack()
+            } else {
+                com.cutvideo.editor.ui.screens.cutout.CutoutScreen(
+                    sourceUri = source,
+                    onBack = { navController.popBackStack() },
+                    onSaveDone = { uri ->
+                        editorVm.showMessage(
+                            if (uri != null) "Transparent PNG saved to Pictures/CutVideo"
+                            else "Could not save the PNG"
+                        )
+                    },
+                    onAddToProject = if (editorVm.doc.value != null) { saved ->
+                        editorVm.importImageLayer(saved)
+                        navController.popBackStack()
+                    } else null
+                )
+            }
         }
 
         composable(Routes.EXPORTS) {

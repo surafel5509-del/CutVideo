@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 
-/** Tools available in the editor's bottom panel. */
+    /** Tools available in the editor's bottom panel. */
 enum class EditorTool(val label: String) {
     NONE("Tools"),
     TRIM("Trim"),
@@ -41,7 +41,11 @@ enum class EditorTool(val label: String) {
     AUDIO("Audio"),
     CHROMA("Chroma"),
     PIP("PiP"),
-    CAPTIONS("Captions")
+    CAPTIONS("Captions"),
+    MASK("Mask"),
+    KEYFRAME("Keyframes"),
+    GRAPH("Graph"),
+    CUTOUT("Cutout")
 }
 
 class EditorViewModel(private val container: AppContainer) : ViewModel() {
@@ -355,6 +359,74 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
         _message.value = if (id != null) "Freeze frame added at the playhead" else "Could not freeze this clip"
     }
 
+    // --- keyframes, masks, revert (CapCut-style tools) --------------------------------------
+
+    fun addKeyframe(property: com.cutvideo.editor.domain.model.KeyframeProperty) =
+        withSelectedClip { editor.addKeyframe(it.id, property, clipLocalPlayhead(it)) }
+
+    /** Adds a keyframe at an explicit clip-local time (used by the graph editor's ramp presets). */
+    fun addKeyframeAt(property: com.cutvideo.editor.domain.model.KeyframeProperty, timeUs: Long) =
+        withSelectedClip { editor.addKeyframe(it.id, property, timeUs.coerceIn(0L, it.durationUs)) }
+
+    fun deleteKeyframe(property: com.cutvideo.editor.domain.model.KeyframeProperty, timeUs: Long) =
+        withSelectedClip { editor.deleteKeyframe(it.id, property, timeUs) }
+
+    fun moveKeyframe(
+        property: com.cutvideo.editor.domain.model.KeyframeProperty,
+        fromUs: Long,
+        toUs: Long,
+        newValue: Float? = null
+    ) = withSelectedClip { editor.moveKeyframe(it.id, property, fromUs, toUs, newValue) }
+
+    fun setKeyframeInterpolation(
+        property: com.cutvideo.editor.domain.model.KeyframeProperty,
+        timeUs: Long,
+        interpolation: com.cutvideo.editor.domain.model.KeyframeInterpolation
+    ) = withSelectedClip { editor.setKeyframeInterpolation(it.id, property, timeUs, interpolation) }
+
+    fun setKeyframeHandles(
+        property: com.cutvideo.editor.domain.model.KeyframeProperty,
+        timeUs: Long,
+        inX: Float,
+        inY: Float,
+        outX: Float,
+        outY: Float
+    ) = withSelectedClip { editor.setKeyframeHandles(it.id, property, timeUs, inX, inY, outX, outY) }
+
+    fun clearKeyframes(property: com.cutvideo.editor.domain.model.KeyframeProperty? = null) =
+        withSelectedClip { editor.clearKeyframes(it.id, property) }
+
+    /** Playhead relative to the selected clip's start (keyframe times are clip-local). */
+    fun clipLocalPlayhead(clip: Clip): Long =
+        (playheadUs.value - clip.startUs).coerceIn(0L, clip.durationUs)
+
+    fun addMask(type: com.cutvideo.editor.domain.model.MaskType) = withSelectedClip { clip ->
+        val id = editor.addMask(clip.id, type)
+        _message.value = if (id != null) {
+            "${type.label} mask added"
+        } else {
+            "Two masks is the render limit — delete one to add another"
+        }
+    }
+
+    fun updateMask(
+        maskId: String,
+        live: Boolean = false,
+        block: (com.cutvideo.editor.domain.model.MaskSpec) -> com.cutvideo.editor.domain.model.MaskSpec
+    ) = withSelectedClip { editor.updateMask(it.id, maskId, live, block) }
+
+    fun deleteMask(maskId: String) = withSelectedClip { editor.deleteMask(it.id, maskId) }
+
+    fun addMaskStroke(stroke: List<com.cutvideo.editor.domain.model.MaskPoint>) =
+        withSelectedClip { editor.addMaskStroke(it.id, stroke) }
+
+    fun revertProperty(group: com.cutvideo.editor.domain.model.RevertGroup) =
+        withSelectedClip { editor.revertProperty(it.id, group) }
+
+    fun revertClip() = withSelectedClip { editor.revertClip(it.id) }
+
+    fun hasRevertSnapshot(clip: Clip): Boolean = clip.original != null
+
     fun reverseSelected() {
         _message.value = "Reverse needs full random-access decoding and is not available in this build"
     }
@@ -382,6 +454,27 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
 
     fun importMedia(uris: List<Uri>, trackType: TrackType) {
         viewModelScope.launch { editor.importMedia(uris, trackType) }
+    }
+
+    /** Adds a photo / transparent PNG as a real overlay layer on the timeline. */
+    fun importImageLayer(uri: Uri) {
+        val projectId = doc.value?.id ?: run {
+            showMessage("Open a project first")
+            return
+        }
+        viewModelScope.launch {
+            val imported = container.mediaImporter.importImage(
+                uri = uri,
+                projectId = projectId,
+                insertAtUs = playheadUs.value
+            )
+            if (imported == null) {
+                showMessage("Could not read that image")
+            } else {
+                editor.addOverlayTrackClip(imported.clip)
+                showMessage("Image added as an overlay layer")
+            }
+        }
     }
 
     fun importSubtitles(uri: Uri) {

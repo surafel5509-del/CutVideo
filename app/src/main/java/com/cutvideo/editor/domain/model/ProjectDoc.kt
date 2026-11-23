@@ -101,7 +101,15 @@ data class Clip(
     val animationIn: ClipAnimationSpec = ClipAnimationSpec(),
     val animationOut: ClipAnimationSpec = ClipAnimationSpec(),
     val transitionIn: TransitionSpec? = null,
-    val transitionOut: TransitionSpec? = null
+    val transitionOut: TransitionSpec? = null,
+    /** Keyframe tracks animating this clip's properties (see [KeyframeProperty]). */
+    val keyframes: List<KeyframeTrack> = emptyList(),
+    /** Masks applied to the rendered image (real alpha masking in the GL pipeline). */
+    val masks: List<MaskSpec> = emptyList(),
+    /** Snapshot of the editable state at import time; the Revert tool restores from this. */
+    val original: ClipOriginal? = null,
+    /** Static image clip (photo / transparent PNG) instead of a video. */
+    val isImage: Boolean = false
 ) {
     val endUs: Long get() = startUs + durationUs
     /** How much source material is consumed by this clip (before speed). */
@@ -109,6 +117,12 @@ data class Clip(
     val isText: Boolean get() = trackType == TrackType.TEXT
     val hasVideoStream: Boolean get() = trackType == TrackType.VIDEO || trackType == TrackType.OVERLAY
     val effectiveVolume: Float get() = if (muted) 0f else volume
+
+    fun keyframeTrack(property: KeyframeProperty): KeyframeTrack? =
+        keyframes.firstOrNull { it.property == property && it.isNotEmpty }
+
+    val hasKeyframes: Boolean get() = keyframes.any { it.isNotEmpty }
+    val hasMasks: Boolean get() = masks.any { it.enabled }
 }
 
 @Serializable

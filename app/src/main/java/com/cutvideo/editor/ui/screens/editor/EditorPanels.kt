@@ -91,6 +91,8 @@ fun EditorToolPanel(
     onPickAudio: () -> Unit,
     onImportSrt: () -> Unit,
     onExportSrt: () -> Unit,
+    onOpenCutout: () -> Unit = {},
+    onPickImageLayer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val filterSource by vm.filterSource.collectAsStateWithLifecycle()
@@ -137,6 +139,10 @@ fun EditorToolPanel(
             EditorTool.CHROMA -> ChromaPanel(clip, vm)
             EditorTool.PIP -> PipPanel(clip, vm)
             EditorTool.CAPTIONS -> CaptionsPanel(doc, playhead, vm, onImportSrt, onExportSrt)
+            EditorTool.MASK -> MaskPanel(clip, vm)
+            EditorTool.KEYFRAME -> KeyframePanel(clip, playhead, vm)
+            EditorTool.GRAPH -> GraphPanel(clip, playhead, vm)
+            EditorTool.CUTOUT -> CutoutPanel(vm, onOpenCutout, onPickImageLayer)
             EditorTool.NONE -> Box(Modifier.fillMaxWidth().height(40.dp))
         }
         Spacer(Modifier.height(14.dp))
@@ -144,7 +150,7 @@ fun EditorToolPanel(
 }
 
 @Composable
-private fun NeedsClip() {
+internal fun NeedsClip() {
     Text(
         "Select a clip on the timeline to use this tool.",
         style = MaterialTheme.typography.bodyMedium,

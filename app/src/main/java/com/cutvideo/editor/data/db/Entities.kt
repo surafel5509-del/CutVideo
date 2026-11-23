@@ -25,7 +25,7 @@ data class ProjectEntity(
     val docJson: String
 )
 
-enum class MediaKind { VIDEO, AUDIO }
+enum class MediaKind { VIDEO, AUDIO, IMAGE }
 
 @Entity(tableName = "media_assets", indices = [Index("projectId")])
 data class MediaAssetEntity(

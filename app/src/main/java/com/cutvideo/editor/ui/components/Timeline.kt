@@ -387,6 +387,42 @@ private fun ClipView(
                 }
             }
     ) {
+        // Keyframe timeline markers: one diamond per keyframe along the clip's top edge.
+        if (clip.hasKeyframes) {
+            Canvas(Modifier.fillMaxWidth().fillMaxHeight()) {
+                clip.keyframes.forEach { track2 ->
+                    track2.sorted.forEach { key ->
+                        val x = (key.timeUs.toFloat() / clip.durationUs.coerceAtLeast(1L)) * size.width
+                        val y = 5f * density.density
+                        val r = 3.2f * density.density
+                        drawLine(
+                            color = Color(0xFFFFD166),
+                            start = Offset(x, y - r),
+                            end = Offset(x + r, y),
+                            strokeWidth = 2f * density.density
+                        )
+                        drawLine(
+                            color = Color(0xFFFFD166),
+                            start = Offset(x + r, y),
+                            end = Offset(x, y + r),
+                            strokeWidth = 2f * density.density
+                        )
+                        drawLine(
+                            color = Color(0xFFFFD166),
+                            start = Offset(x, y + r),
+                            end = Offset(x - r, y),
+                            strokeWidth = 2f * density.density
+                        )
+                        drawLine(
+                            color = Color(0xFFFFD166),
+                            start = Offset(x - r, y),
+                            end = Offset(x, y - r),
+                            strokeWidth = 2f * density.density
+                        )
+                    }
+                }
+            }
+        }
         when (track.type) {
             TrackType.VIDEO, TrackType.OVERLAY -> if (clip.uri.isNotBlank()) {
                 ClipFrame(

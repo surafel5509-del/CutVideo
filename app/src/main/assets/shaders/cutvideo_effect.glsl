@@ -41,6 +41,20 @@ uniform int uWipeMode;
 uniform float uTime;
 uniform float uAspect;
 
+// --- keyframed transform --------------------------------------------------------------------------
+uniform float uTransformScale;
+uniform float uTransformRotation;   // degrees, clockwise
+uniform vec2 uTransformOffset;      // frame fractions
+
+// --- masks (real alpha masking; up to two stacked) -------------------------------------------------
+uniform int uMaskCount;
+uniform int uMaskType[2];           // 0 circle, 1 rect, 2 linear, 3 mirror, 4 freehand
+uniform vec3 uMaskCenterScale[2];   // x, y, scale
+uniform vec4 uMaskParams[2];        // rotation (radians), feather, opacity, expansion
+uniform vec2 uMaskExtras[2];        // roundness, invert
+uniform int uMaskFreehandIndex;     // which mask samples uMaskTexture, -1 when none
+uniform sampler2D uMaskTexture;
+
 // Up to four simultaneous effects, in panel order.
 uniform int uEffectIds[4];
 uniform float uEffectAmounts[4];
@@ -67,6 +81,92 @@ float luma(vec3 c) {
 
 vec3 sampleRgb(vec2 uv) {
     return texture(uTexSampler, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
+}
+
+// --- transform & masks -------------------------------------------------------------------------------
+
+vec2 transformUv(vec2 uv) {
+    if (abs(uTransformScale - 1.0) < 0.001 && abs(uTransformRotation) < 0.001
+        && abs(uTransformOffset.x) < 0.0005 && abs(uTransformOffset.y) < 0.0005) {
+        return uv;
+    }
+    vec2 p = uv - 0.5 - uTransformOffset;
+    p.x *= uAspect;
+    float r = radians(-uTransformRotation);
+    float cs = cos(r);
+    float sn = sin(r);
+    p = vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
+    p /= max(uTransformScale, 0.001);
+    p.x /= uAspect;
+    return p + 0.5;
+}
+
+float uvInBounds(vec2 uv) {
+    return step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
+}
+
+// Rotates `uv` into a mask's local frame (aspect-corrected space).
+vec2 maskLocal(vec2 uv, vec2 center, float rot) {
+    vec2 p = (uv - center) * vec2(uAspect, 1.0);
+    float cs = cos(-rot);
+    float sn = sin(-rot);
+    return vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
+}
+
+// All mask values are passed as plain parameters (not uniform-array indices) so the ES 2.0 build
+// of this shader only ever indexes uniform arrays from the constant loop index in main().
+float maskCoverageValues(vec2 uv, int type, vec2 center, float scale, float rot,
+                         float feather, float expansion, float roundness, int isFreehand) {
+    float featherC = clamp(feather, 0.0, 1.0);
+    if (type == 4) {
+        // Freehand: sample the painted coverage through the mask transform.
+        if (isFreehand == 0) return 1.0;
+        vec2 p = uv - center;
+        float cs = cos(-rot);
+        float sn = sin(-rot);
+        p = vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
+        p /= max(scale, 0.001);
+        vec2 tuv = p + 0.5;
+        if (tuv.x < 0.0 || tuv.x > 1.0 || tuv.y < 0.0 || tuv.y > 1.0) return 0.0;
+        return texture(uMaskTexture, tuv).r;
+    }
+    vec2 p = maskLocal(uv, center, rot);
+    if (type == 0) {
+        float radius = max(scale * (1.0 + expansion), 0.0005);
+        float d = length(p);
+        return 1.0 - smoothstep(radius * (1.0 - featherC), radius + featherC * scale + 1e-5, d);
+    }
+    if (type == 1) {
+        vec2 h = vec2(max(scale * (1.0 + expansion), 0.0005));
+        float round = clamp(roundness, 0.0, 1.0) * min(h.x, h.y);
+        vec2 q = abs(p) - h + vec2(round);
+        float d = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - round;
+        return 1.0 - smoothstep(-featherC * scale, featherC * scale + 1e-5, d);
+    }
+    if (type == 2) {
+        // Linear: a feathered ramp along the mask's local Y axis.
+        float halfSpan = max(scale * (1.0 + expansion), 0.0005);
+        float t = abs(p.y) / halfSpan;
+        return 1.0 - smoothstep(1.0 - max(featherC, 0.001), 1.0, t);
+    }
+    if (type == 3) {
+        // Mirror: a symmetric feathered band around the reflection axis.
+        float halfSpan = max(scale * (1.0 + expansion), 0.0005);
+        float t = abs(p.y) / halfSpan;
+        return 1.0 - smoothstep(1.0 - max(featherC, 0.001), 1.0, t);
+    }
+    return 1.0;
+}
+
+// Mirrors `uv` across a mask's local axis (used by the reflection-style mask).
+vec2 maskMirrorUv(vec2 uv, vec2 center, float rot) {
+    vec2 p = maskLocal(uv, center, rot);
+    p.y = -p.y;
+    float cs = cos(rot);
+    float sn = sin(rot);
+    p = vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
+    p.x /= uAspect;
+    return p + center;
 }
 
 vec3 applyColor(vec3 c) {
@@ -240,7 +340,8 @@ vec3 applyOneEffect(vec3 color, vec2 uv, int id, float amount) {
 }
 
 void main() {
-    vec2 uv = vTex;
+    vec2 uv = transformUv(vTex);
+    float bounds = uvInBounds(uv);
 
     vec3 color;
     if (uBlurRadius > 0.4) {
@@ -302,6 +403,31 @@ void main() {
         } else {
             if (uv.x > uWipe) alpha = 0.0;
         }
+    }
+
+    // Keyframed transforms crop the frame to the transformed region.
+    alpha *= bounds;
+
+    // Masks: each one multiplies the frame's real alpha; reflection-style masks also mirror the
+    // visible content across their axis. Uniform arrays are only indexed by the constant loop
+    // index (required for the ES 2.0 build).
+    if (uMaskCount > 0) {
+        float cover = 1.0;
+        for (int i = 0; i < 2; ++i) {
+            if (i < uMaskCount) {
+                float c = maskCoverageValues(
+                    uv, uMaskType[i], uMaskCenterScale[i].xy, uMaskCenterScale[i].z,
+                    uMaskParams[i].x, uMaskParams[i].y, uMaskParams[i].w, uMaskExtras[i].x,
+                    uMaskFreehandIndex == i ? 1 : 0);
+                if (uMaskType[i] == 3 && c > 0.001) {
+                    vec2 muv = maskMirrorUv(uv, uMaskCenterScale[i].xy, uMaskParams[i].x);
+                    color = mix(color, sampleRgb(muv), c * clamp(uMaskParams[i].z, 0.0, 1.0));
+                }
+                c = mix(c, 1.0 - c, clamp(uMaskExtras[i].y, 0.0, 1.0));
+                cover *= mix(1.0, clamp(c, 0.0, 1.0), clamp(uMaskParams[i].z, 0.0, 1.0));
+            }
+        }
+        alpha *= cover;
     }
 
     fragColor = vec4(color, clamp(alpha, 0.0, 1.0));

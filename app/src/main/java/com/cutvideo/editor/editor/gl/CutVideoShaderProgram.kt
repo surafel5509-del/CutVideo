@@ -34,6 +34,10 @@ internal class CutVideoShaderProgram {
     private var texelWidth = 1f
     private var texelHeight = 1f
 
+    private var maskTextureId = 0
+    private var fallbackMaskTextureId = 0
+    private var uploadedFreehand: FloatArray? = null
+
     private val uniforms = HashMap<String, Int>(32)
     private val positionBuffer: FloatBuffer = floatBufferOf(
         -1f, -1f,
@@ -139,6 +143,97 @@ internal class CutVideoShaderProgram {
         uniform3f("uDuotoneShadow", 0.06f, 0.09f, 0.16f)
         uniform3f("uDuotoneHighlight", 0.96f, 0.83f, 1.0f)
         setEffects(look.effectIds, look.effectAmounts)
+        setTransform(look)
+        setMasks(look)
+    }
+
+    private fun setTransform(look: GlLook) {
+        uniform1f("uTransformScale", look.transformScale)
+        uniform1f("uTransformRotation", look.transformRotation)
+        uniform2f("uTransformOffset", look.transformOffsetX, look.transformOffsetY)
+    }
+
+    private fun setMasks(look: GlLook) {
+        val count = minOf(2, look.masks.size)
+        uniform1i("uMaskCount", count)
+        val types = IntArray(2)
+        val centers = FloatArray(6)
+        val params = FloatArray(8)
+        val extras = FloatArray(4)
+        var freehandIndex = -1
+        for (i in 0 until count) {
+            val mask = look.masks[i]
+            types[i] = mask.type
+            centers[i * 3] = mask.xFrac
+            centers[i * 3 + 1] = mask.yFrac
+            centers[i * 3 + 2] = mask.scale
+            params[i * 4] = mask.rotationRadians
+            params[i * 4 + 1] = mask.feather
+            params[i * 4 + 2] = mask.opacity
+            params[i * 4 + 3] = mask.expansion
+            extras[i * 2] = mask.roundness
+            extras[i * 2 + 1] = mask.invert
+            if (mask.type == 4) freehandIndex = i
+        }
+        uniform1iv("uMaskType[0]", types)
+        uniform3fv("uMaskCenterScale[0]", centers)
+        uniform4fv("uMaskParams[0]", params)
+        uniform2fv("uMaskExtras[0]", extras)
+        uniform1i("uMaskFreehandIndex", freehandIndex)
+
+        // The freehand coverage always occupies texture unit 1 (a 1x1 white fallback when unused)
+        // so the sampler is never left pointing at the video texture.
+        val texture = if (freehandIndex >= 0 && look.freehandAlpha != null && look.freehandWidth > 0) {
+            uploadFreehand(look.freehandAlpha, look.freehandWidth, look.freehandHeight)
+        } else {
+            fallbackMaskTexture()
+        }
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+        uniform1i("uMaskTexture", 1)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+    }
+
+    private fun uploadFreehand(alpha: FloatArray, width: Int, height: Int): Int {
+        if (maskTextureId != 0 && uploadedFreehand === alpha) return maskTextureId
+        if (maskTextureId == 0) {
+            val names = IntArray(1)
+            GLES20.glGenTextures(1, names, 0)
+            maskTextureId = names[0]
+        }
+        val bytes = ByteArray(alpha.size) { i -> (alpha[i].coerceIn(0f, 1f) * 255f).toInt().toByte() }
+        val buffer = ByteBuffer.allocateDirect(bytes.size).put(bytes).apply { position(0) }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, maskTextureId)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_LUMINANCE, width, height, 0,
+            GLES20.GL_LUMINANCE, GLES20.GL_UNSIGNED_BYTE, buffer
+        )
+        uploadedFreehand = alpha
+        return maskTextureId
+    }
+
+    private fun fallbackMaskTexture(): Int {
+        if (fallbackMaskTextureId == 0) {
+            val names = IntArray(1)
+            GLES20.glGenTextures(1, names, 0)
+            fallbackMaskTextureId = names[0]
+            val white = ByteBuffer.allocateDirect(4).put(byteArrayOf(-1, -1, -1, -1)).apply { position(0) }
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, fallbackMaskTextureId)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexImage2D(
+                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, 1, 1, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, white
+            )
+        }
+        return fallbackMaskTextureId
     }
 
     /** Copies the input texture to the framework-owned output framebuffer. */
@@ -203,6 +298,15 @@ internal class CutVideoShaderProgram {
             GLES20.glDeleteProgram(blitHandle)
             blitHandle = 0
         }
+        if (maskTextureId != 0) {
+            GLES20.glDeleteTextures(1, intArrayOf(maskTextureId), 0)
+            maskTextureId = 0
+        }
+        if (fallbackMaskTextureId != 0) {
+            GLES20.glDeleteTextures(1, intArrayOf(fallbackMaskTextureId), 0)
+            fallbackMaskTextureId = 0
+        }
+        uploadedFreehand = null
         uniforms.clear()
     }
 
@@ -238,6 +342,26 @@ internal class CutVideoShaderProgram {
     private fun uniformMatrix3(name: String, values: FloatArray) {
         val location = uniform(name)
         if (location >= 0) GLES20.glUniformMatrix3fv(location, 1, false, values, 0)
+    }
+
+    private fun uniform1iv(name: String, values: IntArray) {
+        val location = uniform(name)
+        if (location >= 0) GLES20.glUniform1iv(location, values.size, values, 0)
+    }
+
+    private fun uniform2fv(name: String, values: FloatArray) {
+        val location = uniform(name)
+        if (location >= 0) GLES20.glUniform2fv(location, values.size / 2, values, 0)
+    }
+
+    private fun uniform3fv(name: String, values: FloatArray) {
+        val location = uniform(name)
+        if (location >= 0) GLES20.glUniform3fv(location, values.size / 3, values, 0)
+    }
+
+    private fun uniform4fv(name: String, values: FloatArray) {
+        val location = uniform(name)
+        if (location >= 0) GLES20.glUniform4fv(location, values.size / 4, values, 0)
     }
 
     private fun createProgram(vertexSource: String, fragmentSource: String): Int {

@@ -27,7 +27,9 @@ class GainAudioProcessor(
     private val fadeInUs: Long,
     private val fadeOutUs: Long,
     private val clipDurationUs: Long,
-    private val nativeEngine: NativeEngine
+    private val nativeEngine: NativeEngine,
+    /** Optional VOLUME keyframe curve evaluated over clip-local time (us). */
+    private val volumeKeyframes: List<com.cutvideo.editor.domain.model.Keyframe>? = null
 ) : BaseAudioProcessor() {
 
     private var frameIndex = 0L
@@ -103,6 +105,17 @@ class GainAudioProcessor(
 
     private fun gainAt(us: Long): Float {
         var g = gain
+        // Keyframed volume: the curve is absolute (1 = clip volume), evaluated at clip-local time.
+        if (volumeKeyframes != null && volumeKeyframes.isNotEmpty()) {
+            g *= com.cutvideo.editor.editor.KeyframeEngine.evaluate(
+                com.cutvideo.editor.domain.model.KeyframeTrack(
+                    com.cutvideo.editor.domain.model.KeyframeProperty.VOLUME,
+                    volumeKeyframes
+                ),
+                us,
+                1f
+            )
+        }
         if (fadeInUs > 0 && us < fadeInUs) {
             g *= (us.toFloat() / fadeInUs.toFloat()).coerceIn(0f, 1f)
         }
