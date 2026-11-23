@@ -537,7 +537,7 @@ private fun PreviewStage(
                                 scaleX = frame.scale
                                 scaleY = frame.scale
                                 rotationZ = frame.rotationDegrees
-                                alpha = frame.alpha
+                                this.alpha = frame.alpha
                             }
                     )
                 }

@@ -182,7 +182,6 @@ private fun com.cutvideo.editor.domain.model.MaskSpec.toGl(
     timelineUs: Long,
     tracks: List<com.cutvideo.editor.domain.model.KeyframeTrack>
 ): GlMask {
-    val p = com.cutvideo.editor.domain.model.KeyframeProperty
     fun maskValue(prop: KeyframeProperty, base: Float): Float {
         val track = tracks.firstOrNull { it.property == prop } ?: return base
         return KeyframeEngine.evaluate(track, timelineUs, base)
@@ -195,13 +194,15 @@ private fun com.cutvideo.editor.domain.model.MaskSpec.toGl(
             MaskType.MIRROR -> 3
             MaskType.FREEHAND -> 4
         },
-        xFrac = maskValue(p.MASK_X, xFrac),
-        yFrac = maskValue(p.MASK_Y, yFrac),
-        scale = maskValue(p.MASK_SCALE, scale),
-        rotationRadians = Math.toRadians(maskValue(p.MASK_ROTATION, rotationDegrees).toDouble()).toFloat(),
-        feather = maskValue(p.MASK_FEATHER, feather),
-        opacity = maskValue(p.MASK_OPACITY, opacity),
-        expansion = maskValue(p.MASK_EXPANSION, expansion),
+        xFrac = maskValue(KeyframeProperty.MASK_X, xFrac),
+        yFrac = maskValue(KeyframeProperty.MASK_Y, yFrac),
+        scale = maskValue(KeyframeProperty.MASK_SCALE, scale),
+        rotationRadians = Math.toRadians(
+            maskValue(KeyframeProperty.MASK_ROTATION, rotationDegrees).toDouble()
+        ).toFloat(),
+        feather = maskValue(KeyframeProperty.MASK_FEATHER, feather),
+        opacity = maskValue(KeyframeProperty.MASK_OPACITY, opacity),
+        expansion = maskValue(KeyframeProperty.MASK_EXPANSION, expansion),
         roundness = roundness,
         invert = if (invert) 1f else 0f
     )

@@ -614,7 +614,7 @@ class EditorController(
                 val existing = clip.masks.firstOrNull { m -> m.type == com.cutvideo.editor.domain.model.MaskType.FREEHAND }
                 if (existing != null) {
                     clip.copy(masks = clip.masks.map { m ->
-                        if (m.id == existing.id) m.copy(strokes = m.strokes + stroke) else m
+                        if (m.id == existing.id) m.copy(strokes = m.strokes + listOf(stroke)) else m
                     })
                 } else {
                     val mask = com.cutvideo.editor.domain.model.MaskSpec(

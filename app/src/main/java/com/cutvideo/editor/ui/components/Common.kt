@@ -183,10 +183,10 @@ fun GradientButton(
 @Composable
 fun GhostButton(
     text: String,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    onClick: () -> Unit
 ) {
     Row(
         modifier = modifier

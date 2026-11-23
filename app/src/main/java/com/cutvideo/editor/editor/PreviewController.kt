@@ -94,7 +94,7 @@ class PreviewController(
         localTimeProvider = { presentationTimeUs ->
             val clip = activeClipForLook
             if (clip != null && clip.speed > 0f) {
-                ((presentationTimeUs - clip.sourceInUs) / clip.speed).coerceAtLeast(0L)
+                (((presentationTimeUs - clip.sourceInUs) / clip.speed).toLong()).coerceAtLeast(0L)
             } else {
                 presentationTimeUs
             }

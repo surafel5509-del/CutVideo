@@ -48,6 +48,21 @@ no simulated rendering — if a capability is missing on the device, the app say
   from 0.25× to 4× with pitch-corrected audio, freeze frame.
 * **Pro tools** — copy / paste a clip's look, apply one look to every clip, one-tap auto enhance measured
   from a real frame (exposure, contrast, saturation, detail), send a clip to the overlay track, detach audio.
+* **Masks** — circle, rectangle, linear, mirror (reflection-style) and freehand masks with position, scale,
+  rotation, feather, opacity, expand/contract, invert and corner roundness. Up to two stack, and they cut
+  real alpha in the GLSL render pipeline — the same code path runs in the preview and the export.
+* **Keyframes** — 17 animatable properties (position X/Y, scale, rotation, opacity, volume, blur, glow,
+  effect intensity, crop, mask position/scale/rotation/feather/opacity/expansion, speed) with per-keyframe
+  interpolation (linear, ease in/out/in-out, hold, custom Bézier). Keyframes are persisted with the project
+  and shown as diamonds on the timeline. Preview and export share one evaluation engine.
+* **Graph / curve editor** — drag keyframe dots to retime/revalue, drag Bézier handles for custom velocity,
+  tap to seek, and build real speed ramps: SPEED curves are applied by a Media3 `SpeedProvider` in the export
+  and continuously in the preview.
+* **Revert** — per-property-group or whole-clip restore from the import-time snapshot with confirmation.
+  The original media file is never modified, and every revert is undoable.
+* **Photo cutout** — manual background remover: erase/restore brushes (size, hardness, opacity), move
+  (zoom/pan) mode, stroke undo/redo, edge refinement and feathering, a true checkerboard alpha preview,
+  transparent PNG export to Pictures/CutVideo, and the result can be added to the timeline as an image layer.
 * **Composition** — crop, rotate, scale, chroma key (key colour, similarity, smoothness, spill), and
   picture-in-picture for overlay clips.
 * **Audio** — per-clip volume, fades, mute, master volume, extracted audio tracks, imported music, recorded
@@ -139,13 +154,19 @@ the suite actually executed.
 
 * **Reverse playback** and **stabilisation** require random-access decoding / device gyro support that this
   build does not implement. The buttons are labelled *Not available* instead of silently doing nothing.
-* **PiP overlays** are preview-only in this build: export adds a warning instead of dropping the overlay
-  silently.
+* **PiP overlays** (video and image) are preview-only in this build: export adds a warning instead of
+  dropping the overlay silently. Compositing overlays into the exported file needs a video compositor that
+  Media3 Transformer 1.11 does not provide for multi-video-item compositions.
 * **Reversed clips** export forward, and the export screen warns about it.
+* **Speed ramps** map curve time to media time piecewise-linearly in the export's `SpeedProvider`; for
+  strongly varying ramps the mapping is an approximation (documented in `RampedSpeedProvider`). The preview
+  follows the same curve through `playbackParameters`.
+* **Mask keyframes** animate the first mask (the shader carries two masks; keyframe tracks are per property).
 * 1440p/4K exports depend on the device encoder; the preflight check warns before you start.
 * Hardware effects can be disabled in Settings if a device's GL driver misbehaves; the preview then uses
-  the CPU look path. If the look shader itself fails to build on a driver, the renderer falls back to a
-  pass-through blit so preview and export never turn black.
+  the CPU look path. The GLSL pipeline ships ES 3.0 and ES 2.0 shader variants (derived by `GlslCompat`)
+  because Media3 falls back to an ES 2.0 context on some devices; if the look shader still fails to build
+  on a driver, the renderer falls back to a pass-through blit so preview and export never turn black.
 * **Auto enhance** analyses one frame per clip (mean/std/colourfulness) — it is adaptive colour grading,
   not scene or face detection.
 * Exports retry once with H.264 when the device's H.265 encoder fails; the export screen reports the swap.

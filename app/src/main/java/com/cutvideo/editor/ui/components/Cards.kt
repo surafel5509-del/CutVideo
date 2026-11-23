@@ -476,9 +476,9 @@ fun ExportCard(
         }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GhostButton("Play", onPlay, icon = Icons.Rounded.PlayArrow)
-            GhostButton("Share", onShare, icon = Icons.Rounded.Movie)
-            GhostButton("Delete", onDelete)
+            GhostButton("Play", onClick = onPlay, icon = Icons.Rounded.PlayArrow)
+            GhostButton("Share", onClick = onShare, icon = Icons.Rounded.Movie)
+            GhostButton("Delete", onClick = onDelete)
         }
     }
 }
