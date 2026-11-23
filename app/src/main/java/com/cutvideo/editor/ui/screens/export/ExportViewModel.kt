@@ -87,7 +87,8 @@ class ExportViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshNotes() {
         val document = doc.value ?: return
-        _notes.value = export.preflight(document, currentSettings())
+        _notes.value = runCatching { export.preflight(document, currentSettings()) }
+            .getOrElse { listOf(it.message ?: "This project cannot be exported yet") }
     }
 
     fun start() {

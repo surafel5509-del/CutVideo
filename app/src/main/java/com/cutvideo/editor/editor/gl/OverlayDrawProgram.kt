@@ -14,6 +14,10 @@ import java.nio.FloatBuffer
  *
  * Kept separate from [CutVideoShaderProgram] so the colour pass and the compositing pass can be
  * chained as two Media3 effects without either one owning the other's GL state.
+ *
+ * Like the colour program, this supports both ES 3.0 and ES 2.0 contexts: the asset shaders are ES
+ * 3.0 and are converted for ES 2.0 on the fly (see [GlslCompat]) because Media3 falls back to an ES
+ * 2.0 context on some devices.
  */
 internal class OverlayDrawProgram {
 
@@ -96,11 +100,38 @@ internal class OverlayDrawProgram {
     }
 
     private fun buildProgram(context: Context): Int {
-        val vertex = load(context, "shaders/cutvideo_overlay_vertex.glsl", FALLBACK_VERTEX)
-        val fragment = load(context, "shaders/cutvideo_overlay_fragment.glsl", FALLBACK_FRAGMENT)
-        val vs = compile(GLES20.GL_VERTEX_SHADER, vertex)
-        val fs = compile(GLES20.GL_FRAGMENT_SHADER, fragment)
-        if (vs == 0 || fs == 0) return 0
+        val vertexEs3 = load(context, "shaders/cutvideo_overlay_vertex.glsl", FALLBACK_VERTEX_ES3)
+        val fragmentEs3 = load(context, "shaders/cutvideo_overlay_fragment.glsl", FALLBACK_FRAGMENT_ES3)
+        val es3 = CutVideoShaderProgram.glContextIsEs3()
+        val attempts = if (es3) {
+            listOf(vertexEs3 to fragmentEs3, es2(vertexEs3, false) to es2(fragmentEs3, true))
+        } else {
+            listOf(es2(vertexEs3, false) to es2(fragmentEs3, true), vertexEs3 to fragmentEs3)
+        }
+        for ((vertex, fragment) in attempts) {
+            if (vertex.isEmpty() || fragment.isEmpty()) continue
+            val program = link(vertex, fragment)
+            if (program != 0) return program
+        }
+        Log.e(TAG, "overlay program failed to build on this GL context")
+        return 0
+    }
+
+    private fun es2(source: String, fragment: Boolean): String = try {
+        GlslCompat.toEs2(source, fragment)
+    } catch (t: Throwable) {
+        Log.e(TAG, "cannot build the ES 2.0 overlay variant", t)
+        ""
+    }
+
+    private fun link(vertexSource: String, fragmentSource: String): Int {
+        val vs = compile(GLES20.GL_VERTEX_SHADER, vertexSource)
+        val fs = compile(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
+        if (vs == 0 || fs == 0) {
+            if (vs != 0) GLES20.glDeleteShader(vs)
+            if (fs != 0) GLES20.glDeleteShader(fs)
+            return 0
+        }
         val program = GLES20.glCreateProgram()
         GLES20.glAttachShader(program, vs)
         GLES20.glAttachShader(program, fs)
@@ -141,7 +172,7 @@ internal class OverlayDrawProgram {
     private companion object {
         const val TAG = "OverlayDrawProgram"
 
-        val FALLBACK_VERTEX = """
+        val FALLBACK_VERTEX_ES3 = """
             #version 300 es
             in vec4 aFramePosition;
             in vec4 aTexSamplingCoord;
@@ -153,7 +184,7 @@ internal class OverlayDrawProgram {
             }
         """.trimIndent()
 
-        val FALLBACK_FRAGMENT = """
+        val FALLBACK_FRAGMENT_ES3 = """
             #version 300 es
             precision mediump float;
             in vec2 vTex;

@@ -1,6 +1,8 @@
 package com.cutvideo.editor.export
 
 import android.content.Context
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.Log
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
@@ -13,7 +15,6 @@ import androidx.media3.effect.Crop
 import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.ScaleAndRotateTransformation
-import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
@@ -35,6 +36,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -52,10 +54,17 @@ class ExportException(
  * Builds and runs the export with Media3 Transformer.
  *
  * The composition is generated from the same [ProjectDoc] the preview uses:
- *  - one video sequence with one [EditedMediaItem] per video clip (clipping = trim, speed effect,
- *    the CutVideo GPU shader, then the text compositor),
- *  - one audio sequence per audio track (with the gain processor placing each clip absolutely),
+ *  - one video sequence with one [EditedMediaItem] per video clip (clipping = trim, speed through
+ *    `EditedMediaItem.setSpeed`, the CutVideo GPU shader, then the text compositor),
+ *  - one audio sequence per audio track (gaps place each clip at its absolute timeline position,
+ *    the gain processor applies volume and fades),
  *  - output resolution / frame rate / codec from [ExportSettings].
+ *
+ * Threading contract (critical): `Transformer` must be created and accessed from one and the same
+ * thread's `Looper` — `Transformer.start`, `getProgress` and `cancel` all call
+ * `verifyApplicationThread()`. This class owns a dedicated [HandlerThread] for the whole export so
+ * every Transformer call happens on that looper and none of them can throw
+ * `IllegalStateException: Transformer is accessed on the wrong thread.`
  *
  * Progress comes from `Transformer.getProgress()` and the export listener — never synthesised.
  */
@@ -79,6 +88,9 @@ class TransformerExporter(
 
     var lastTransformer: Transformer? = null
         private set
+
+    private var exportThread: HandlerThread? = null
+    private var exportHandler: Handler? = null
 
     /** Validates the project and builds the Media3 composition (also used for the pre-flight UI). */
     fun buildPlan(doc: ProjectDoc, settings: ExportSettings): Plan {
@@ -128,8 +140,9 @@ class TransformerExporter(
         sequences += EditedMediaItemSequence.withAudioAndVideoFrom(items)
 
         doc.tracks.filter { it.type == TrackType.AUDIO && !it.muted }.forEach { track ->
-            val audioItems = buildAudioSequence(track.clips, track.volume, settings)
-            if (audioItems.isNotEmpty()) sequences += EditedMediaItemSequence.withAudioFrom(audioItems)
+            buildAudioSequence(track.clips, track.volume, settings, warnings)?.let { sequence ->
+                sequences += sequence
+            }
         }
 
         val composition = Composition.Builder(sequences).build()
@@ -155,27 +168,39 @@ class TransformerExporter(
     ): EditedMediaItem {
         val videoEffects = ArrayList<Effect>()
 
-        if (clip.transform.isCropped) {
-            val t = clip.transform
-            // Crop takes normalised device coordinates: left, right, bottom, top.
-            videoEffects += Crop(
-                -1f + 2f * t.cropLeft,
-                1f - 2f * t.cropRight,
-                -1f + 2f * t.cropBottom,
-                1f - 2f * t.cropTop
-            )
+        val t = clip.transform
+        if (t.isCropped) {
+            val left = t.cropLeft.coerceIn(0f, 0.98f)
+            val right = t.cropRight.coerceIn(0f, 0.98f)
+            val top = t.cropTop.coerceIn(0f, 0.98f)
+            val bottom = t.cropBottom.coerceIn(0f, 0.98f)
+            // Media3's Crop throws IllegalArgumentException unless right > left and top > bottom,
+            // so only emit the effect when the crop region is genuinely valid.
+            if (left + right < 1f && top + bottom < 1f) {
+                // Crop takes normalised device coordinates: left, right, bottom, top.
+                videoEffects += Crop(
+                    -1f + 2f * left,
+                    1f - 2f * right,
+                    -1f + 2f * bottom,
+                    1f - 2f * top
+                )
+            } else {
+                warnings.add("Clip '${clip.name}' has an empty crop region — crop ignored")
+            }
         }
 
-        if (clip.transform.rotationDegrees != 0f || clip.transform.scaleX != 1f || clip.transform.scaleY != 1f) {
+        if (t.rotationDegrees != 0f || t.scaleX != 1f || t.scaleY != 1f) {
             videoEffects += ScaleAndRotateTransformation.Builder()
-                .setRotationDegrees(clip.transform.rotationDegrees)
-                .setScale(clip.transform.scaleX, clip.transform.scaleY)
+                .setRotationDegrees(t.rotationDegrees)
+                .setScale(t.scaleX.coerceIn(0.05f, 10f), t.scaleY.coerceIn(0.05f, 10f))
                 .build()
         }
 
-        if (clip.speed != 1f) {
-            videoEffects += SpeedChangeEffect(clip.speed)
-        }
+        // NOTE: speed is applied ONLY through EditedMediaItem.setSpeed below. Media3 1.11 rejects
+        // (checkState in EditedMediaItem) an item that combines a SpeedProvider with a
+        // speed-changing effect such as SpeedChangeEffect, and applying it twice would also break
+        // the clip durations. setSpeed adjusts video timestamps *and* the audio (with pitch
+        // handling) so the item lands on the timeline at the duration the document expects.
 
         videoEffects += CutVideoGlEffect(
             clipProvider = { clip },
@@ -198,10 +223,9 @@ class TransformerExporter(
         )
 
         val audioProcessors = ArrayList<AudioProcessor>()
-        val lead = 0L
-        if (!clip.muted && !GainAudioProcessor.isNoOp(clip.volume, clip.fadeInUs, clip.fadeOutUs, lead)) {
+        if (!clip.muted && !GainAudioProcessor.isNoOp(clip.effectiveVolume, clip.fadeInUs, clip.fadeOutUs, 0L)) {
             audioProcessors += GainAudioProcessor(
-                leadSilenceUs = lead,
+                leadSilenceUs = 0L,
                 gain = clip.effectiveVolume,
                 fadeInUs = clip.fadeInUs,
                 fadeOutUs = clip.fadeOutUs,
@@ -213,39 +237,56 @@ class TransformerExporter(
         val builder = EditedMediaItem.Builder(mediaItemFor(clip))
             .setEffects(Effects(audioProcessors, videoEffects))
             .setFrameRate(settings.frameRate.fps)
-        if (clip.speed != 1f) builder.setSpeed(FixedSpeedProvider(clip.speed))
+        if (clip.speed != 1f && clip.speed > 0f) builder.setSpeed(FixedSpeedProvider(clip.speed))
         if (clip.muted) builder.setRemoveAudio(true)
 
         if (clip.uri.isBlank()) warnings.add("Clip '${clip.name}' has no media and was skipped")
         return builder.build()
     }
 
-    private fun buildAudioSequence(clips: List<Clip>, trackVolume: Float, settings: ExportSettings): List<EditedMediaItem> {
+    /**
+     * Builds one audio track's sequence *including the gaps* that place every clip at its absolute
+     * timeline position. Gaps are first-class in Media3 (`EditedMediaItemSequence.Builder#addGap`)
+     * and render as silence, which is exact — no hand-rolled lead-silence processor that would
+     * distort the item's duration model.
+     *
+     * @return the sequence, or null when the track has no usable clips.
+     */
+    private fun buildAudioSequence(
+        clips: List<Clip>,
+        trackVolume: Float,
+        settings: ExportSettings,
+        warnings: MutableList<String>
+    ): EditedMediaItemSequence? {
         val sorted = clips.filter { it.uri.isNotBlank() }.sortedBy { it.startUs }
-        val items = ArrayList<EditedMediaItem>(sorted.size)
+        if (sorted.isEmpty()) return null
+        val builder = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
         var cursorUs = 0L
         sorted.forEach { clip ->
             val leadSilence = max(0L, clip.startUs - cursorUs)
+            if (leadSilence > 0L) builder.addGap(leadSilence)
             val processors = ArrayList<AudioProcessor>()
             val gain = clip.effectiveVolume * trackVolume
-            if (!GainAudioProcessor.isNoOp(gain, clip.fadeInUs, clip.fadeOutUs, leadSilence)) {
+            if (!GainAudioProcessor.isNoOp(gain, clip.fadeInUs, clip.fadeOutUs, 0L)) {
                 processors += GainAudioProcessor(
-                    leadSilenceUs = leadSilence,
+                    leadSilenceUs = 0L,
                     gain = gain.coerceIn(0f, 2f),
                     fadeInUs = clip.fadeInUs,
                     fadeOutUs = clip.fadeOutUs,
-                    clipDurationUs = clip.durationUs + leadSilence,
+                    clipDurationUs = clip.durationUs,
                     nativeEngine = nativeEngine
                 )
             }
             val itemBuilder = EditedMediaItem.Builder(mediaItemFor(clip))
                 .setEffects(Effects(processors, listOf()))
                 .setFrameRate(settings.frameRate.fps)
-            if (clip.speed != 1f) itemBuilder.setSpeed(FixedSpeedProvider(clip.speed))
-            items += itemBuilder.build()
+            if (clip.speed != 1f && clip.speed > 0f) {
+                itemBuilder.setSpeed(FixedSpeedProvider(clip.speed))
+            }
+            builder.addItem(itemBuilder.build())
             cursorUs = clip.endUs
         }
-        return items
+        return builder.build()
     }
 
     private fun textOverlaysFor(
@@ -292,71 +333,138 @@ class TransformerExporter(
 
     /**
      * Runs the export. Suspends until Transformer reports completion, error or cancellation.
-     * Progress is polled from `Transformer.getProgress` and reported through [onProgress].
+     *
+     * Everything Transformer-related happens on one dedicated [HandlerThread] looper:
+     * construction, `start`, the `getProgress` poll and `cancel`. Progress is reported through
+     * [onProgress].
      */
     suspend fun export(
         plan: Plan,
         settings: ExportSettings,
         outputFile: File,
         onProgress: (progress: Float, framesPerSecond: Float?) -> Unit
-    ): Result = suspendCancellableCoroutine { continuation ->
+    ): Result = withContext(Dispatchers.IO) {
         outputFile.parentFile?.mkdirs()
         if (outputFile.exists()) outputFile.delete()
 
-        val progressHolder = ProgressHolder()
-        var progressJob: Job? = null
+        suspendCancellableCoroutine { continuation ->
+            val thread = HandlerThread("cutvideo-export").apply { start() }
+            exportThread = thread
+            val handler = Handler(thread.looper)
+            exportHandler = handler
 
-        val transformer = Transformer.Builder(context)
-            .setVideoMimeType(settings.codec.mime)
-            .setAudioMimeType(MimeTypes.AUDIO_AAC)
-            .addListener(object : Transformer.Listener {
-                override fun onCompleted(composition: Composition, exportResult: androidx.media3.transformer.ExportResult) {
-                    progressJob?.cancel()
-                    if (continuation.isActive) {
-                        continuation.resume(
-                            Result(outputFile, plan.estimatedDurationUs, plan.warnings)
-                        )
-                    }
+            val progressHolder = ProgressHolder()
+            var progressTicker: Runnable? = null
+
+            fun shutdownThread() {
+                runCatching {
+                    handler.removeCallbacksAndMessages(null)
+                    thread.quitSafely()
                 }
+                if (exportThread === thread) {
+                    exportThread = null
+                    exportHandler = null
+                }
+            }
 
-                override fun onError(
-                    composition: Composition,
-                    exportResult: androidx.media3.transformer.ExportResult,
-                    exportException: androidx.media3.transformer.ExportException
-                ) {
-                    progressJob?.cancel()
-                    Log.e(TAG, "export failed", exportException)
+            handler.post {
+                if (!continuation.isActive) {
+                    shutdownThread()
+                    return@post
+                }
+                try {
+                    val transformer = Transformer.Builder(context)
+                        .setLooper(thread.looper)
+                        .setVideoMimeType(settings.codec.mime)
+                        .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                        .addListener(object : Transformer.Listener {
+                            override fun onCompleted(
+                                composition: Composition,
+                                exportResult: androidx.media3.transformer.ExportResult
+                            ) {
+                                progressTicker?.let { handler.removeCallbacks(it) }
+                                shutdownThread()
+                                if (continuation.isActive) {
+                                    continuation.resume(
+                                        Result(outputFile, plan.estimatedDurationUs, plan.warnings)
+                                    )
+                                }
+                            }
+
+                            override fun onError(
+                                composition: Composition,
+                                exportResult: androidx.media3.transformer.ExportResult,
+                                exportException: androidx.media3.transformer.ExportException
+                            ) {
+                                progressTicker?.let { handler.removeCallbacks(it) }
+                                shutdownThread()
+                                Log.e(TAG, "export failed", exportException)
+                                runCatching { outputFile.delete() }
+                                if (continuation.isActive) {
+                                    continuation.resumeWithException(
+                                        ExportException(
+                                            describeError(exportException),
+                                            exportException,
+                                            exportException.errorCodeName
+                                        )
+                                    )
+                                }
+                            }
+                        })
+                        .build()
+                    lastTransformer = transformer
+
+                    transformer.start(plan.composition, outputFile.absolutePath)
+
+                    // Poll real Transformer progress on the same looper (getProgress also verifies
+                    // the application thread, so it must never be called from a random dispatcher).
+                    val ticker = object : Runnable {
+                        override fun run() {
+                            if (!continuation.isActive) return
+                            val state =
+                                runCatching { transformer.getProgress(progressHolder) }.getOrNull()
+                            if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+                                onProgress(progressHolder.progress / 100f, null)
+                            }
+                            handler.postDelayed(this, 250)
+                        }
+                    }
+                    progressTicker = ticker
+                    handler.postDelayed(ticker, 250)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "could not start export", t)
+                    shutdownThread()
                     if (continuation.isActive) {
                         continuation.resumeWithException(
-                            ExportException(describeError(exportException), exportException, exportException.errorCodeName)
+                            ExportException(
+                                t.message ?: "Could not start the export on this device",
+                                t
+                            )
                         )
                     }
                 }
-            })
-            .build()
-        lastTransformer = transformer
-
-        transformer.start(plan.composition, outputFile.absolutePath)
-
-        progressJob = scope.launch(Dispatchers.Default) {
-            while (continuation.isActive) {
-                val state = runCatching { transformer.getProgress(progressHolder) }.getOrNull()
-                if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
-                    onProgress(progressHolder.progress / 100f, null)
-                }
-                delay(250)
             }
-        }
 
-        continuation.invokeOnCancellation {
-            progressJob?.cancel()
-            runCatching { transformer.cancel() }
-            runCatching { outputFile.delete() }
+            continuation.invokeOnCancellation {
+                val activeHandler = exportHandler ?: handler
+                activeHandler.post {
+                    runCatching { lastTransformer?.cancel() }
+                    runCatching { outputFile.delete() }
+                }
+                shutdownThread()
+            }
         }
     }
 
+    /** Cancels a running export. Safe to call from any thread. */
     fun cancel() {
-        runCatching { lastTransformer?.cancel() }
+        val handler = exportHandler
+        val transformer = lastTransformer
+        if (handler != null && transformer != null) {
+            handler.post { runCatching { transformer.cancel() } }
+        } else {
+            runCatching { transformer?.cancel() }
+        }
     }
 
     private fun describeError(error: androidx.media3.transformer.ExportException): String {
@@ -375,8 +483,8 @@ class TransformerExporter(
 
     /**
      * Constant speed handed to `EditedMediaItem.Builder#setSpeed`, which adjusts both the video
-     * timestamps and the audio (with pitch correction) so the item lands on the timeline at the
-     * duration the document expects.
+     * timestamps and the audio so the item lands on the timeline at the duration the document
+     * expects. This is the *only* place speed is applied — never alongside a SpeedChangeEffect.
      */
     private class FixedSpeedProvider(private val speed: Float) : SpeedProvider {
         override fun getSpeed(timeUs: Long): Float = speed

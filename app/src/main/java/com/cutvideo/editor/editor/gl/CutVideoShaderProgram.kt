@@ -8,11 +8,16 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
 /**
- * Minimal OpenGL ES 3.0 program for the CutVideo colour/effect shader.
+ * Minimal OpenGL ES program for the CutVideo colour/effect shader.
  *
- * Written directly against GLES20 (which is valid inside an ES 3.0 context) instead of a helper
- * library so the whole pipeline is explicit: one full-screen triangle strip in, one texture in, the
- * framework-owned framebuffer out.
+ * Written directly against GLES20 (which is valid inside an ES 2.0 *and* an ES 3.0 context) instead
+ * of a helper library so the whole pipeline is explicit: one full-screen triangle strip in, one
+ * texture in, the framework-owned framebuffer out.
+ *
+ * Media3 creates an ES 3.0 context when it can and falls back to ES 2.0 otherwise. The shader
+ * assets are ES 3.0 (`#version 300 es`); on an ES 2.0 context they are converted on the fly by
+ * [GlslCompat]. If the look shader cannot be built at all, a pass-through blit (also provided in
+ * both ES variants) keeps frames flowing so preview and export never turn black or freeze.
  */
 internal class CutVideoShaderProgram {
 
@@ -24,6 +29,10 @@ internal class CutVideoShaderProgram {
     private var positionLocation = -1
     private var texCoordLocation = -1
     private var samplerLocation = -1
+
+    /** Pending texel size; applied while the program is bound (glUniform needs a current program). */
+    private var texelWidth = 1f
+    private var texelHeight = 1f
 
     private val uniforms = HashMap<String, Int>(32)
     private val positionBuffer: FloatBuffer = floatBufferOf(
@@ -42,15 +51,38 @@ internal class CutVideoShaderProgram {
     val isValid: Boolean get() = handle != 0 || blitHandle != 0
 
     fun init(context: Context) {
-        if (handle != 0) return
-        val vertex = loadShaderSource(context, "shaders/cutvideo_effect_vertex.glsl", FALLBACK_VERTEX)
-        val fragment = loadShaderSource(context, "shaders/cutvideo_effect.glsl", FALLBACK_FRAGMENT)
-        handle = createProgram(vertex, fragment)
+        if (handle != 0 || blitHandle != 0) return
+        val appContext = context.applicationContext
+        val es3 = glContextIsEs3()
+
+        val vertexEs3 = loadShaderSource(appContext, "shaders/cutvideo_effect_vertex.glsl", FALLBACK_VERTEX_ES3)
+        val fragmentEs3 = loadShaderSource(appContext, "shaders/cutvideo_effect.glsl", FALLBACK_FRAGMENT_ES3)
+
+        // Preferred variant first, then the other one — some drivers report a version they cannot
+        // actually compile for, so try both before giving up on the look shader.
+        if (es3) {
+            handle = createProgram(vertexEs3, fragmentEs3)
+            if (handle == 0) handle = createProgram(safeEs2(vertexEs3, false), safeEs2(fragmentEs3, true))
+        } else {
+            handle = createProgram(safeEs2(vertexEs3, false), safeEs2(fragmentEs3, true))
+            if (handle == 0) handle = createProgram(vertexEs3, fragmentEs3)
+        }
+
         if (handle == 0) {
             // Never leave the pipeline without a program: a broken driver/shader combination would
             // otherwise render an empty (black) frame instead of the untouched video.
             Log.e(TAG, "look shader failed to build, falling back to a pass-through blit")
-            blitHandle = createProgram(vertex, BLIT_FRAGMENT)
+            if (es3) {
+                blitHandle = createProgram(vertexEs3, BLIT_FRAGMENT_ES3)
+                    .takeIf { it != 0 } ?: createProgram(safeEs2(vertexEs3, false), BLIT_FRAGMENT_ES2)
+            } else {
+                blitHandle = createProgram(safeEs2(vertexEs3, false), BLIT_FRAGMENT_ES2)
+                    .takeIf { it != 0 } ?: createProgram(vertexEs3, BLIT_FRAGMENT_ES3)
+            }
+            if (blitHandle == 0) {
+                Log.e(TAG, "even the pass-through blit failed to build — frames will not render")
+                return
+            }
             blitProgramPosition = GLES20.glGetAttribLocation(blitHandle, "aFramePosition")
             blitProgramTexCoord = GLES20.glGetAttribLocation(blitHandle, "aTexSamplingCoord")
             blitProgramSampler = GLES20.glGetUniformLocation(blitHandle, "uTexSampler")
@@ -71,11 +103,16 @@ internal class CutVideoShaderProgram {
         }
     }
 
+    /** Stores the texel size; applied on the next [setLook]/[draw] while the program is bound. */
     fun setTexelSize(width: Int, height: Int) {
-        uniform2f("uTexelSize", 1f / width.coerceAtLeast(1), 1f / height.coerceAtLeast(1))
+        texelWidth = 1f / width.coerceAtLeast(1)
+        texelHeight = 1f / height.coerceAtLeast(1)
     }
 
     fun setLook(look: GlLook) {
+        // uTexelSize used to be written from configure() with no program bound (GL_INVALID_OPERATION);
+        // apply it here where a program is guaranteed to be current.
+        uniform2f("uTexelSize", texelWidth, texelHeight)
         uniformMatrix3("uFilterMatrix", look.filterMatrix)
         uniform3f("uFilterOffset", look.filterOffset[0], look.filterOffset[1], look.filterOffset[2])
         uniform1f("uFilterIntensity", look.filterIntensity)
@@ -206,7 +243,11 @@ internal class CutVideoShaderProgram {
     private fun createProgram(vertexSource: String, fragmentSource: String): Int {
         val vertexShader = compile(GLES20.GL_VERTEX_SHADER, vertexSource)
         val fragmentShader = compile(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
-        if (vertexShader == 0 || fragmentShader == 0) return 0
+        if (vertexShader == 0 || fragmentShader == 0) {
+            if (vertexShader != 0) GLES20.glDeleteShader(vertexShader)
+            if (fragmentShader != 0) GLES20.glDeleteShader(fragmentShader)
+            return 0
+        }
         val program = GLES20.glCreateProgram()
         GLES20.glAttachShader(program, vertexShader)
         GLES20.glAttachShader(program, fragmentShader)
@@ -238,6 +279,13 @@ internal class CutVideoShaderProgram {
         return shader
     }
 
+    private fun safeEs2(source: String, fragment: Boolean): String = try {
+        GlslCompat.toEs2(source, fragment)
+    } catch (t: Throwable) {
+        Log.e(TAG, "cannot build the ES 2.0 variant", t)
+        ""
+    }
+
     private fun loadShaderSource(context: Context, path: String, fallback: String): String = try {
         context.assets.open(path).bufferedReader().use { it.readText() }
     } catch (t: Throwable) {
@@ -245,10 +293,16 @@ internal class CutVideoShaderProgram {
         fallback
     }
 
-    private companion object {
-        const val TAG = "CutVideoShader"
+    internal companion object {
+        private const val TAG = "CutVideoShader"
 
-        val FALLBACK_VERTEX = """
+        /** True when the current GL context is ES 3.0 (Media3 falls back to ES 2.0 otherwise). */
+        fun glContextIsEs3(): Boolean {
+            val version = runCatching { GLES20.glGetString(GLES20.GL_VERSION) }.getOrNull() ?: return true
+            return version.contains("OpenGL ES 3") || version.contains("OpenGL ES-CM 3")
+        }
+
+        val FALLBACK_VERTEX_ES3 = """
             #version 300 es
             in vec4 aFramePosition;
             in vec4 aTexSamplingCoord;
@@ -260,7 +314,7 @@ internal class CutVideoShaderProgram {
         """.trimIndent()
 
         /** Passthrough + alpha so a shader failure never black-frames the preview. */
-        val FALLBACK_FRAGMENT = """
+        val FALLBACK_FRAGMENT_ES3 = """
             #version 300 es
             precision mediump float;
             in vec2 vTex;
@@ -277,7 +331,7 @@ internal class CutVideoShaderProgram {
          * Minimal copy program used when the look shader cannot be built on this GPU/driver.
          * It only samples the input texture, so the frame always reaches the encoder.
          */
-        val BLIT_FRAGMENT = """
+        val BLIT_FRAGMENT_ES3 = """
             #version 300 es
             precision mediump float;
             in vec2 vTex;
@@ -285,6 +339,15 @@ internal class CutVideoShaderProgram {
             uniform sampler2D uTexSampler;
             void main() {
                 fragColor = texture(uTexSampler, vTex);
+            }
+        """.trimIndent()
+
+        val BLIT_FRAGMENT_ES2 = """
+            precision mediump float;
+            varying vec2 vTex;
+            uniform sampler2D uTexSampler;
+            void main() {
+                gl_FragColor = texture2D(uTexSampler, vTex);
             }
         """.trimIndent()
 

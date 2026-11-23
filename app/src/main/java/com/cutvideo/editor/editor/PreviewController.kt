@@ -75,19 +75,21 @@ class PreviewController(
         .build()
         .apply {
             // The colour pipeline always reads the clip that is active right now, so a single effect
-            // instance covers the whole playlist.
-            setVideoEffects(
-                listOf(
-                    CutVideoGlEffect(
-                        clipProvider = {
-                            activeClipForLook ?: Clip(id = "placeholder", trackType = TrackType.VIDEO)
-                        },
-                        aspect = aspect,
-                        applyAnimation = false
-                    )
-                )
-            )
+            // instance covers the whole playlist. Must be set before prepare() — Media3 requires the
+            // effects pipeline to exist before the first prepare.
+            setVideoEffects(listOf(buildLookEffect()))
         }
+
+    /** Aspect the GPU effect was last bound with (effects can be swapped mid-playback). */
+    private var effectsAspect: AspectRatio = AspectRatio.RATIO_16_9
+
+    private fun buildLookEffect(): CutVideoGlEffect = CutVideoGlEffect(
+        clipProvider = {
+            activeClipForLook ?: Clip(id = "placeholder", trackType = TrackType.VIDEO)
+        },
+        aspect = aspect,
+        applyAnimation = false
+    )
 
     private val musicPlayer: ExoPlayer = ExoPlayer.Builder(appContext).build()
     private val overlayPlayer: ExoPlayer = ExoPlayer.Builder(appContext).build()
@@ -141,6 +143,12 @@ class PreviewController(
         val previousPlaying = player.isPlaying
         doc = document
         aspect = document.aspect
+        if (effectsAspect != aspect) {
+            // The effect reads the project aspect for its uniforms; rebind so a portrait project
+            // is graded with the right aspect ratio. Media3 allows changing effects mid-playback.
+            effectsAspect = aspect
+            runCatching { player.setVideoEffects(listOf(buildLookEffect())) }
+        }
         videoClips = document.tracks
             .filter { it.type == TrackType.VIDEO }
             .flatMap { it.sortedClips }

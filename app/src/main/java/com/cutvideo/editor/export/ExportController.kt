@@ -66,6 +66,10 @@ class ExportController(
             }
         } catch (e: ExportException) {
             notes += e.message ?: "This project cannot be exported yet"
+        } catch (t: Throwable) {
+            // buildPlan must never crash the export screen: surface the problem as a note instead.
+            Log.e(TAG, "preflight failed", t)
+            notes += t.message ?: "This project cannot be exported yet"
         }
         return notes
     }
