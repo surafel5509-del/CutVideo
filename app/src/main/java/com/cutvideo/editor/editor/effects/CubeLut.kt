@@ -43,7 +43,8 @@ data class CubeLut(
 
     /**
      * Tiles the lattice into an RGBA8 byte buffer for GL upload: blue slice `b` occupies the
-     * columns `[b*size, (b+1)*size)`; within a slice x = r, y = g.
+     * columns `[b*size, (b+1)*size)`; within a slice x = r, y = g. Bytes are raw GL data —
+     * read them unsigned (`b.toInt() and 0xFF`) if comparing values above 127.
      */
     fun tileToRgba(): ByteArray {
         val width = size * size

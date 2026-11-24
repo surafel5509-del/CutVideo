@@ -49,10 +49,11 @@ class CubeLutTest {
         val rgba = lut.tileToRgba()
         assertEquals(9 * 3 * 4, rgba.size)
         // Pixel at x = b*size + r, y = g. Take b=2, g=1, r=0 → x=6, y=1.
+        // ByteArray is signed — compare the unsigned byte value (what GL reads).
         val pixel = (1 * 9 + 6) * 4
-        assertEquals(0, rgba[pixel].toInt())      // r = 0
-        assertEquals(128, rgba[pixel + 1].toInt()) // g = 1/2 * 255 ≈ 128
-        assertEquals(255, rgba[pixel + 2].toInt()) // b = 1
+        assertEquals(0, rgba[pixel].toInt() and 0xFF)        // r = 0
+        assertEquals(128, rgba[pixel + 1].toInt() and 0xFF)  // g = 1/2 * 255 ≈ 128
+        assertEquals(255, rgba[pixel + 2].toInt() and 0xFF)  // b = 1
     }
 
     @Test
