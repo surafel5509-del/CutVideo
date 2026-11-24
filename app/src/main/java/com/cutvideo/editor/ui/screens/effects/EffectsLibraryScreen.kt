@@ -197,9 +197,7 @@ fun EffectsLibraryScreen(
                 val presets = EffectsCatalog.all().filter { activeGroup == null || it.group == activeGroup }
                 items(presets, key = { it.id }) { preset ->
                     // Effects that render only in the GPU chain have no CPU thumbnail pipeline.
-                    val pro = preset.id in setOf(
-                        "gaussian_blur", "glow", "bloom_pro", "drop_shadow", "vignette_pro", "grain_pro"
-                    )
+                    val pro = com.cutvideo.editor.nativebridge.NativeEffectIds.idOf(preset.id) >= 24
                     val preview = if (pro) null else clip?.let {
                         rememberLookPreview(
                             source = source,

@@ -227,6 +227,120 @@ object EffectCatalog {
                 EffectParamDef("size", "Grain size", 0.5f, 4f, 1f),
                 EffectParamDef("speed", "Animation speed", 0f, 4f, 1f),
                 EffectParamDef("roughness", "Roughness", 0f, 1f, 0.5f)
+            )),
+
+        // ---- Phase 2: colour grading & digital effects -------------------------------------------
+        EffectDef("lgg", "Lift / Gamma / Gain", EffectCategory.COLOR, "Per-channel lift, gamma and gain",
+            Color(0xFF34D399), defaultIntensity = 1f,
+            params = listOf(
+                EffectParamDef("liftR", "Lift R", -0.3f, 0.3f, 0f),
+                EffectParamDef("liftG", "Lift G", -0.3f, 0.3f, 0f),
+                EffectParamDef("liftB", "Lift B", -0.3f, 0.3f, 0f),
+                EffectParamDef("gamma", "Gamma", 0.4f, 2.5f, 1f),
+                EffectParamDef("gainR", "Gain R", 0.5f, 1.5f, 1f),
+                EffectParamDef("gainG", "Gain G", 0.5f, 1.5f, 1f),
+                EffectParamDef("gainB", "Gain B", 0.5f, 1.5f, 1f)
+            ), premium = true),
+        EffectDef("curves", "RGB Curves", EffectCategory.COLOR, "Parametric shadow/midtone/highlight curve",
+            Color(0xFF22D3EE), defaultIntensity = 1f,
+            params = listOf(
+                EffectParamDef("shadows", "Shadows", -0.5f, 0.5f, 0f),
+                EffectParamDef("midtones", "Midtones", -0.5f, 0.5f, 0f),
+                EffectParamDef("highlights", "Highlights", -0.5f, 0.5f, 0f),
+                EffectParamDef("contrast", "Contrast", -0.5f, 1f, 0f)
+            ), premium = true),
+        EffectDef("color_wheels", "Color Wheels", EffectCategory.COLOR, "Tint shadows, mids and highlights",
+            Color(0xFFF472B6), defaultIntensity = 1f,
+            params = listOf(
+                EffectParamDef("shadowsHue", "Shadows hue", 0f, 1f, 0.6f),
+                EffectParamDef("shadowsSat", "Shadows sat", 0f, 1f, 0.12f),
+                EffectParamDef("midsHue", "Mids hue", 0f, 1f, 0.12f),
+                EffectParamDef("midsSat", "Mids sat", 0f, 1f, 0.06f),
+                EffectParamDef("highsHue", "Highlights hue", 0f, 1f, 0.1f),
+                EffectParamDef("highsSat", "Highlights sat", 0f, 1f, 0.1f),
+                EffectParamDef("balance", "Balance", -1f, 1f, 0f)
+            ), premium = true),
+        EffectDef("hue_sat", "Hue vs Sat / Lum", EffectCategory.COLOR, "Selective hue adjustments",
+            Color(0xFFA78BFA), defaultIntensity = 1f,
+            params = listOf(
+                EffectParamDef("hueCenter", "Hue centre", 0f, 1f, 0f),
+                EffectParamDef("hueRange", "Hue range", 0.02f, 1f, 0.25f),
+                EffectParamDef("hueShift", "Hue shift", -1f, 1f, 0f),
+                EffectParamDef("satAdjust", "Saturation", -1f, 1f, 0f),
+                EffectParamDef("lumAdjust", "Luminance", -1f, 1f, 0f)
+            ), premium = true),
+        EffectDef("film_emulation", "Film Emulation", EffectCategory.COLOR, "Print density, fade and warmth",
+            Color(0xFFFBBF24), defaultIntensity = 1f,
+            params = listOf(
+                EffectParamDef("density", "Density", -0.5f, 1f, 0.15f),
+                EffectParamDef("fade", "Fade", 0f, 1f, 0.15f),
+                EffectParamDef("warmth", "Warmth", -1f, 1f, 0.2f),
+                EffectParamDef("saturation", "Saturation", -1f, 1f, -0.1f)
+            ), premium = true),
+        EffectDef("teal_orange", "Teal & Orange", EffectCategory.COLOR, "Blockbuster split toning",
+            Color(0xFF0EA5E9), defaultIntensity = 1f,
+            params = listOf(
+                EffectParamDef("shadowTint", "Shadow tint", 0f, 1f, 0.5f),
+                EffectParamDef("highlightTint", "Highlight tint", 0f, 1f, 0.5f),
+                EffectParamDef("balance", "Balance", -1f, 1f, 0f)
+            )),
+        EffectDef("bleach_bypass", "Bleach Bypass", EffectCategory.COLOR, "Silver-retention contrast",
+            Color(0xFF94A3B8), defaultIntensity = 1f,
+            params = listOf(
+                EffectParamDef("contrast", "Contrast", 0f, 1f, 0.5f),
+                EffectParamDef("desaturation", "Desaturation", 0f, 1f, 0.5f)
+            )),
+        EffectDef("cube_lut", ".cube LUT", EffectCategory.COLOR, "Import and apply a 3D colour LUT",
+            Color(0xFFFB7185), defaultIntensity = 1f, premium = true),
+        EffectDef("rgb_split", "RGB Split", EffectCategory.DIGITAL, "Directional channel separation",
+            Color(0xFFF43F5E), defaultIntensity = 0.6f,
+            params = listOf(
+                EffectParamDef("angle", "Angle", 0f, 1f, 0f),
+                EffectParamDef("spread", "Spread", 0f, 3f, 1f),
+                EffectParamDef("radial", "Radial", 0f, 1f, 0.4f)
+            )),
+        EffectDef("pixel_sort", "Pixel Sort", EffectCategory.DIGITAL, "Bright pixels sorted into streaks",
+            Color(0xFF22D3EE), defaultIntensity = 0.7f,
+            params = listOf(
+                EffectParamDef("threshold", "Threshold", 0f, 1f, 0.55f),
+                EffectParamDef("length", "Streak length", 0.1f, 1f, 0.5f),
+                EffectParamDef("direction", "Vertical", 0f, 1f, 0f)
+            )),
+        EffectDef("datamosh", "Datamosh", EffectCategory.DIGITAL, "Block displacement and smear",
+            Color(0xFFE879F9), defaultIntensity = 0.7f,
+            params = listOf(
+                EffectParamDef("blocks", "Block density", 2f, 48f, 12f),
+                EffectParamDef("smear", "Smear", 0f, 1f, 0.5f),
+                EffectParamDef("seed", "Seed", 0f, 20f, 0f)
+            )),
+        EffectDef("liquid", "Liquid Warp", EffectCategory.DISTORT, "Fluid UV displacement",
+            Color(0xFF2DD4BF), defaultIntensity = 0.6f,
+            params = listOf(
+                EffectParamDef("amplitude", "Amplitude", 0f, 2f, 0.6f),
+                EffectParamDef("frequency", "Frequency", 0.2f, 4f, 1f),
+                EffectParamDef("speed", "Speed", 0f, 3f, 1f)
+            )),
+        EffectDef("displacement", "Displacement", EffectCategory.DISTORT, "Directional wave warp",
+            Color(0xFF818CF8), defaultIntensity = 0.6f,
+            params = listOf(
+                EffectParamDef("angle", "Angle", 0f, 1f, 0f),
+                EffectParamDef("amount", "Amount", 0f, 2f, 0.6f),
+                EffectParamDef("scale", "Wave scale", 0.2f, 4f, 1f)
+            )),
+
+        // ---- Phase 3: motion blur family ---------------------------------------------------------
+        EffectDef("motion_blur", "Motion Blur", EffectCategory.BLUR, "Directional multi-tap blur",
+            Color(0xFF60A5FA), defaultIntensity = 0.7f,
+            params = listOf(
+                EffectParamDef("angle", "Angle", 0f, 1f, 0f),
+                EffectParamDef("distance", "Distance", 0f, 2f, 0.7f)
+            )),
+        EffectDef("radial_blur", "Radial Motion", EffectCategory.BLUR, "Zoom blur around a centre",
+            Color(0xFF38BDF8), defaultIntensity = 0.7f,
+            params = listOf(
+                EffectParamDef("centerX", "Centre X", -0.5f, 1.5f, 0.5f),
+                EffectParamDef("centerY", "Centre Y", -0.5f, 1.5f, 0.5f),
+                EffectParamDef("strength", "Strength", 0f, 2f, 0.8f)
             ))
     )
 

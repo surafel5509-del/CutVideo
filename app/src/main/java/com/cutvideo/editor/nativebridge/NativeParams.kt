@@ -73,7 +73,24 @@ object NativeEffectIds {
         "bloom_pro" to 26,
         "drop_shadow" to 27,
         "vignette_pro" to 28,
-        "grain_pro" to 29
+        "grain_pro" to 29,
+        // --- Phase 2: colour grading & digital ------------------------------------------------
+        "lgg" to 30,
+        "curves" to 31,
+        "color_wheels" to 32,
+        "hue_sat" to 33,
+        "film_emulation" to 34,
+        "teal_orange" to 35,
+        "bleach_bypass" to 36,
+        "cube_lut" to 37,
+        "rgb_split" to 38,
+        "pixel_sort" to 39,
+        "datamosh" to 40,
+        "liquid" to 41,
+        "displacement" to 42,
+        // --- Phase 3: motion blur family ------------------------------------------------------
+        "motion_blur" to 43,
+        "radial_blur" to 44
     )
 
     init {

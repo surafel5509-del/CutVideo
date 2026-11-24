@@ -233,7 +233,11 @@ object TransitionCatalog {
         TransitionPreset(TransitionType.SLIDE_RIGHT, "Push Right", "Frame exits to the right", Color(0xFF60A5FA)),
         TransitionPreset(TransitionType.SLIDE_DOWN, "Drop", "Frame pushes downwards", Color(0xFF2DD4BF)),
         TransitionPreset(TransitionType.GLITCH, "Glitch Cut", "Digital tearing between clips", Color(0xFFE879F9)),
-        TransitionPreset(TransitionType.BLUR, "Blur Dissolve", "Soft focus hand-off", Color(0xFF94A3B8))
+        TransitionPreset(TransitionType.BLUR, "Blur Dissolve", "Soft focus hand-off", Color(0xFF94A3B8)),
+        TransitionPreset(TransitionType.FLASH, "Flash", "Burn through white", Color(0xFFFDE68A)),
+        TransitionPreset(TransitionType.WHIP_PAN, "Whip Pan", "Motion-smeared slide", Color(0xFF60A5FA)),
+        TransitionPreset(TransitionType.LIGHT_LEAK, "Light Leak", "Warm glow sweep", Color(0xFFF97316)),
+        TransitionPreset(TransitionType.MASK_WIPE, "Soft Wipe", "Diagonal feathered wipe", Color(0xFFA78BFA))
     )
 
     fun preset(type: TransitionType): TransitionPreset =

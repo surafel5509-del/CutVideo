@@ -93,9 +93,15 @@ object AnimationEngine {
             TransitionType.SLIDE_DOWN -> AnimationFrame(translateY = -(1f - t))
             TransitionType.GLITCH -> AnimationFrame(
                 alpha = t,
-                translateX = sin(t * 60f) * (1f - t) * 0.04f
+                translateX = sin(t * 60f) * (1f - t) * 0.04f,
+                wipe = t
             )
             TransitionType.BLUR -> AnimationFrame(alpha = t, blurRadiusPx = (1f - t) * 20f)
+            // Phase 3: shader wipe modes 5–8 (see `uWipeMode` in cutvideo_effect.glsl).
+            TransitionType.FLASH -> AnimationFrame(wipe = t)
+            TransitionType.WHIP_PAN -> AnimationFrame(wipe = t)
+            TransitionType.LIGHT_LEAK -> AnimationFrame(wipe = t)
+            TransitionType.MASK_WIPE -> AnimationFrame(wipe = t)
         }
     }
 
@@ -188,8 +194,18 @@ object AnimationEngine {
         compose(clip.copy(startUs = 0L), localUs)
 
     /** Wipe mode hint for the native CPU mask / shader: 0 = horizontal, 1 = circular iris. */
-    fun wipeMode(transition: TransitionType?): Int =
-        if (transition == TransitionType.CIRCLE) 1 else 0
+    /** Shader `uWipeMode` for a transition (mirror of the wipe block in cutvideo_effect.glsl). */
+    fun wipeMode(transition: TransitionType?): Int = when (transition) {
+        TransitionType.WIPE -> 0
+        TransitionType.CIRCLE -> 1
+        TransitionType.GLITCH -> 3
+        TransitionType.BLUR -> 4
+        TransitionType.FLASH -> 5
+        TransitionType.WHIP_PAN -> 6
+        TransitionType.LIGHT_LEAK -> 7
+        TransitionType.MASK_WIPE -> 8
+        else -> 9 // cross fade (and anything driven purely by transform/alpha)
+    }
 
     private fun progress(elapsedUs: Long, windowUs: Long): Float =
         if (windowUs <= 0L) 1f else (elapsedUs.toFloat() / windowUs.toFloat()).coerceIn(0f, 1f)

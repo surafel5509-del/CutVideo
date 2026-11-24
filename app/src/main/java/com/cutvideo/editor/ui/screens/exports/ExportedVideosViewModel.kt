@@ -26,6 +26,10 @@ class ExportedVideosViewModel(private val container: AppContainer) : ViewModel()
         }
     }
 
+    fun notify(text: String) {
+        _message.value = text
+    }
+
     fun dismissMessage() {
         _message.value = null
     }

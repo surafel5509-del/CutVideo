@@ -186,7 +186,9 @@ data class EffectSpec(
     val blend: BlendMode = BlendMode.NORMAL,
     val enabled: Boolean = true,
     /** Stable identity for keyframe targeting and duplication. */
-    val instanceId: String = Ids.newId("fx")
+    val instanceId: String = Ids.newId("fx"),
+    /** For `cube_lut`: absolute path of the imported `.cube` file (copied into app storage). */
+    val lutPath: String = ""
 ) {
     /** Effective value of one parameter: keyframed overrides (see `EffectChain`) use [paramAt]. */
     fun param(key: String): Float = params[key] ?: EffectCatalog.paramDef(id, key)?.default ?: 0f
@@ -275,7 +277,9 @@ data class ClipAnimationSpec(
 enum class TransitionType {
     // Mirrors `TransitionType` in timeline_renderer.h — append only.
     FADE, SLIDE_LEFT, SLIDE_UP, ZOOM, WIPE, CIRCLE,
-    SLIDE_RIGHT, SLIDE_DOWN, GLITCH, BLUR
+    SLIDE_RIGHT, SLIDE_DOWN, GLITCH, BLUR,
+    // Phase 3 additions (shader wipe modes 5–8).
+    FLASH, WHIP_PAN, LIGHT_LEAK, MASK_WIPE
 }
 
 @Serializable

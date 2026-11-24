@@ -209,7 +209,16 @@ class PreviewController(
     // ---------------------------------------------------------------------------------------------
 
     fun play() {
-        if (videoClips.isEmpty()) return
+        if (videoClips.isEmpty()) {
+            _state.value = _state.value.copy(error = "No video clips to play")
+            return
+        }
+        // A PlaybackException leaves the player in STATE_IDLE, where playWhenReady alone never
+        // starts playback again — the play button would silently die. Re-prepare first.
+        if (player.playbackState == Player.STATE_IDLE) {
+            player.setMediaItems(videoClips.map { mediaItemFor(it) }, player.currentMediaItemIndex.coerceAtLeast(0), 0L)
+            player.prepare()
+        }
         player.play()
         if (musicClipId != null) musicPlayer.play()
         if (overlayClipId != null) overlayPlayer.play()
@@ -266,7 +275,7 @@ class PreviewController(
     fun timelinePositionUs(): Long {
         val clip = videoClips.getOrNull(player.currentMediaItemIndex) ?: return 0L
         val localUs = player.currentPosition * 1000L
-        return clip.startUs + (localUs / clip.speed).toLong()
+        return clip.startUs + (localUs / clip.speed.coerceAtLeast(0.05f)).toLong()
     }
 
     // ---------------------------------------------------------------------------------------------

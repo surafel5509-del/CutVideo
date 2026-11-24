@@ -97,12 +97,21 @@ fun ExportedVideosScreen(
                         ExportCard(
                             export = export,
                             onPlay = {
-                                runCatching {
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(Uri.parse(export.contentUri), "video/mp4")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(intent)
+                                // Never fail silently: a dead Play button with no feedback reads as
+                                // a broken app. Try a plain viewer first, then a chooser, then say why.
+                                val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(Uri.parse(export.contentUri), "video/mp4")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                val started = runCatching {
+                                    context.startActivity(playIntent)
+                                    true
+                                }.recoverCatching {
+                                    context.startActivity(Intent.createChooser(playIntent, "Play ${export.projectName}"))
+                                    true
+                                }.getOrDefault(false)
+                                if (!started) {
+                                    vm.notify("No video player found on this device")
                                 }
                             },
                             onShare = {

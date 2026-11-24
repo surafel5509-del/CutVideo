@@ -366,6 +366,16 @@ class EditorController(
         }
     }
 
+    fun setEffectLutPath(clipId: String, instanceId: String, path: String) {
+        mutate("Set LUT") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(effects = clip.effects.map {
+                    if (it.instanceId == instanceId) it.copy(lutPath = path) else it
+                })
+            }
+        }
+    }
+
     /** Replaces the clip's chain with a named multi-effect preset stack. */
     fun applyEffectStack(clipId: String, stackId: String) {
         val stack = com.cutvideo.editor.domain.model.EffectCatalog.stacks.firstOrNull { it.id == stackId } ?: return
@@ -615,6 +625,42 @@ class EditorController(
                     it.property == property && it.targetId == instanceId && it.param == param
                 }
                 clip.copy(keyframes = if (next.isEmpty) remaining else remaining + next)
+            }
+        }
+    }
+
+    /**
+     * Writes a motion-track result as POSITION_X/Y keyframes (replacing previous transform
+     * position tracks). Undoable like every other edit.
+     */
+    fun applyMotionTrack(clipId: String, keys: List<com.cutvideo.editor.editor.tracking.TrackedKey>) {
+        if (keys.isEmpty()) return
+        mutate("Track motion") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val xs = com.cutvideo.editor.domain.model.KeyframeTrack(
+                    com.cutvideo.editor.domain.model.KeyframeProperty.POSITION_X,
+                    keys.map {
+                        com.cutvideo.editor.domain.model.Keyframe(
+                            timeUs = it.timeUs.coerceIn(0L, clip.durationUs),
+                            value = it.dx.coerceIn(-1f, 1f)
+                        )
+                    }
+                )
+                val ys = com.cutvideo.editor.domain.model.KeyframeTrack(
+                    com.cutvideo.editor.domain.model.KeyframeProperty.POSITION_Y,
+                    keys.map {
+                        com.cutvideo.editor.domain.model.Keyframe(
+                            timeUs = it.timeUs.coerceIn(0L, clip.durationUs),
+                            value = it.dy.coerceIn(-1f, 1f)
+                        )
+                    }
+                )
+                clip.copy(
+                    keyframes = clip.keyframes.filterNot {
+                        it.property == com.cutvideo.editor.domain.model.KeyframeProperty.POSITION_X ||
+                            it.property == com.cutvideo.editor.domain.model.KeyframeProperty.POSITION_Y
+                    } + xs + ys
+                )
             }
         }
     }

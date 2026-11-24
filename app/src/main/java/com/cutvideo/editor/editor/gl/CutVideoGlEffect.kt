@@ -63,8 +63,29 @@ private class CutVideoGlShaderProgram(
         val clip = clipProvider()
         val localUs = localTimeProvider(presentationTimeUs)
         val animation = if (applyAnimation) AnimationEngine.composeLocal(clip, localUs) else null
-        val look = GlLookFactory.from(clip, aspect, localUs, animation)
-        chainRenderer.drawFrame(inputTexId, look, outputWidth, outputHeight)
+        val look = try {
+            GlLookFactory.from(clip, aspect, localUs, animation)
+        } catch (t: Throwable) {
+            // A broken look must never kill playback: fall back to the untouched input.
+            android.util.Log.e("CutVideoEffect", "look build failed, passing frame through", t)
+            program.drawBlit(inputTexId)
+            return
+        }
+        try {
+            chainRenderer.drawFrame(inputTexId, look, outputWidth, outputHeight)
+        } catch (t: Throwable) {
+            // Any chain failure degrades to the look-only draw (frames keep flowing; playback
+            // stays alive) — then to a raw pass-through if even that fails.
+            android.util.Log.e("CutVideoEffect", "chain draw failed, falling back to look pass", t)
+            try {
+                program.use()
+                program.setLook(look)
+                program.draw(inputTexId)
+            } catch (t2: Throwable) {
+                android.util.Log.e("CutVideoEffect", "look draw failed too, passing frame through", t2)
+                program.drawBlit(inputTexId)
+            }
+        }
     }
 
     override fun release() {

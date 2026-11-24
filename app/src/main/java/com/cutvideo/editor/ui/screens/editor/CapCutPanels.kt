@@ -93,6 +93,22 @@ fun MaskPanel(clip: Clip?, vm: EditorViewModel) {
             style = MaterialTheme.typography.bodySmall,
             color = CutColors.TextTertiary
         )
+        Spacer(Modifier.height(12.dp))
+
+        // --- motion tracking ----------------------------------------------------------------------
+        Text("MOTION TRACKING", style = MaterialTheme.typography.labelSmall, color = CutColors.TextTertiary)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Tracks the centre of the frame across the clip and writes real position keyframes " +
+                "(works with masks, PiP and text layers).",
+            style = MaterialTheme.typography.bodySmall,
+            color = CutColors.TextTertiary
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GhostButton("Track motion") { vm.trackMotion() }
+            GhostButton("Clear position keys") { vm.clearKeyframes(com.cutvideo.editor.domain.model.KeyframeProperty.POSITION_X); vm.clearKeyframes(com.cutvideo.editor.domain.model.KeyframeProperty.POSITION_Y) }
+        }
         Spacer(Modifier.height(10.dp))
 
         if (clip.masks.isEmpty()) {

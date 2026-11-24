@@ -69,6 +69,21 @@ internal class EffectPassProgram {
             uniform1i("uBlend", blend)
             uniform4fv("uP0", p0)
             uniform4fv("uP1", p1)
+            uniform1f("uLutSize", 0f)
+        }
+    }
+
+    /** The .cube LUT effect: same as [drawSingle] but with the tiled LUT bound on unit 2. */
+    fun drawSingleLut(tex: Int, strength: Float, blend: Int, lutTexId: Int, lutSize: Int) {
+        draw(tex) {
+            uniform1i("uStage", 0)
+            uniform1i("uEffectId", 37)
+            uniform1f("uStrength", strength)
+            uniform1i("uBlend", blend)
+            uniform4fv("uP0", floatArrayOf(0f, 0f, 0f, 0f))
+            uniform4fv("uP1", floatArrayOf(0f, 0f, 0f, 0f))
+            bindTexture(2, lutTexId, "uLutTexture")
+            uniform1f("uLutSize", lutSize.toFloat())
         }
     }
 

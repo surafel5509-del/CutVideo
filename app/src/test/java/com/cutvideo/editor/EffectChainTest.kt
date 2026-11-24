@@ -76,7 +76,15 @@ class EffectChainTest {
         )
         assertEquals(
             listOf("gaussian_blur", "glow", "bloom_pro", "drop_shadow", "vignette_pro", "grain_pro"),
-            byId.drop(23)
+            byId.drop(23).take(6)
+        )
+        assertEquals(
+            listOf(
+                "lgg", "curves", "color_wheels", "hue_sat", "film_emulation", "teal_orange",
+                "bleach_bypass", "cube_lut", "rgb_split", "pixel_sort", "datamosh", "liquid",
+                "displacement", "motion_blur", "radial_blur"
+            ),
+            byId.drop(29)
         )
     }
 

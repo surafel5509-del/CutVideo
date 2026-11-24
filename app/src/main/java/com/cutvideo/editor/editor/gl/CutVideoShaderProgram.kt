@@ -234,7 +234,7 @@ internal class CutVideoShaderProgram {
     }
 
     /** Copies the input texture to the framework-owned output framebuffer. */
-    private fun drawBlit(inputTextureId: Int) {
+    fun drawBlit(inputTextureId: Int) {
         if (blitHandle == 0) return
         GLES20.glUseProgram(blitHandle)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)

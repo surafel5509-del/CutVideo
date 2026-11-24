@@ -89,6 +89,8 @@ internal class EffectChainRenderer(private val lookProgram: CutVideoShaderProgra
 
     fun release() {
         passProgram.release()
+        lutCache.values.forEach { GLES20.glDeleteTextures(1, intArrayOf(it.first), 0) }
+        lutCache.clear()
         targets?.release()
         targets = null
     }
@@ -99,6 +101,22 @@ internal class EffectChainRenderer(private val lookProgram: CutVideoShaderProgra
         val targets = targets ?: return current
         val next = pickWrite(used)
         targets.bind(next)
+        if (resolved.spec.id == "cube_lut") {
+            val lut = lutTextureFor(resolved.spec.lutPath)
+            if (lut != null) {
+                passProgram.drawSingleLut(
+                    tex = targets.textures[current],
+                    strength = resolved.intensity,
+                    blend = resolved.blendOrdinal,
+                    lutTexId = lut.first,
+                    lutSize = lut.second
+                )
+                return next
+            }
+            // No LUT bound: keep the frame intact (identity) instead of rendering nothing.
+            passProgram.drawMix(targets.textures[current], targets.textures[current], 0, 0f)
+            return next
+        }
         passProgram.drawSingle(
             tex = targets.textures[current],
             effectId = NativeEffectIds.idOf(resolved.spec.id),
@@ -108,6 +126,40 @@ internal class EffectChainRenderer(private val lookProgram: CutVideoShaderProgra
             p1 = packParams(resolved, 4)
         )
         return next
+    }
+
+    /**
+     * LUT textures are parsed once per file and cached on the GL thread. `path → (textureId, size)`.
+     * Entries are released in [release].
+     */
+    private val lutCache = HashMap<String, Pair<Int, Int>>(2)
+
+    private fun lutTextureFor(path: String): Pair<Int, Int>? {
+        if (path.isBlank()) return null
+        lutCache[path]?.let { return it }
+        val lut = runCatching {
+            com.cutvideo.editor.editor.effects.CubeLuts.parse(java.io.File(path).readText())
+        }.getOrElse {
+            android.util.Log.e("CutVideoChain", "cannot load LUT $path", it)
+            return null
+        }
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        val bytes = lut.tileToRgba()
+        val buffer = java.nio.ByteBuffer.allocateDirect(bytes.size).put(bytes)
+        buffer.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, lut.size * lut.size, lut.size, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        val entry = tex[0] to lut.size
+        lutCache[path] = entry
+        return entry
     }
 
     /** Separable gaussian: `quality` iterations of H+V, then a blend over the original frame. */

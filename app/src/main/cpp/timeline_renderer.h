@@ -27,7 +27,8 @@ enum class AnimationType : int32_t {
 enum class TransitionType : int32_t {
     // Order must match `TransitionType` in Kotlin — append only.
     kFade = 0, kSlideLeft, kSlideUp, kZoom, kWipe, kCircle,
-    kSlideRight, kSlideDown, kGlitch, kBlur
+    kSlideRight, kSlideDown, kGlitch, kBlur,
+    kFlash, kWhipPan, kLightLeak, kMaskWipe
 };
 
 struct ClipDesc {

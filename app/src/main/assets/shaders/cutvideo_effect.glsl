@@ -253,10 +253,69 @@ void main() {
     }
 
     if (uWipe < 0.999) {
-        if (uWipeMode == 1) {
+        if (uWipeMode == 9) {
+            // Cross fade: the whole frame fades in.
+            alpha *= uWipe;
+        } else if (uWipeMode == 1) {
             vec2 p = uv - 0.5;
             float r = length(p * vec2(uAspect, 1.0)) / 0.72;
             if (r > uWipe) alpha = 0.0;
+        } else if (uWipeMode == 2) {
+            // Iris from the corner: radial reveal around a moving centre.
+            vec2 p = uv - vec2(0.15, 0.85);
+            float r = length(p * vec2(uAspect, 1.0)) / 1.1;
+            if (r > uWipe) alpha = 0.0;
+        } else if (uWipeMode == 3) {
+            // Glitch cut: hard reveal with RGB tearing in the boundary band.
+            if (uv.x > uWipe) {
+                alpha = 0.0;
+            } else {
+                float edge = uWipe - uv.x;
+                if (edge < 0.06) {
+                    float j = (hash11(floor(uv.y * 30.0) * 0.31 + floor(uTime * 12.0)) - 0.5) * 0.05;
+                    color.r = sampleRgb(uv + vec2(j, 0.0)).r;
+                    color.b = sampleRgb(uv - vec2(j, 0.0)).b;
+                }
+            }
+        } else if (uWipeMode == 4) {
+            // Blur dissolve: the entering edge arrives out of focus.
+            if (uv.x > uWipe) {
+                alpha = 0.0;
+            } else {
+                float edge = uWipe - uv.x;
+                if (edge < 0.12) {
+                    color = mix(color, blur9(uv, 10.0), (0.12 - edge) / 0.12);
+                }
+            }
+        } else if (uWipeMode == 5) {
+            // Flash: the clip burns in through white.
+            alpha *= smoothstep(0.0, 0.35, uWipe);
+            float flash = clamp((1.0 - uWipe) * 1.25 - 0.15, 0.0, 1.0);
+            color = mix(color, vec3(1.0), flash);
+        } else if (uWipeMode == 6) {
+            // Whip pan: the frame slides in from the right with motion smear.
+            float t = 1.0 - uWipe;
+            vec2 shifted = uv + vec2(t * 0.35, 0.0);
+            if (shifted.x > 1.0 || shifted.x < 0.0) {
+                alpha = 0.0;
+            } else {
+                vec3 c = sampleRgb(shifted);
+                c = (c + sampleRgb(shifted + vec2(t * 0.05, 0.0)) +
+                     sampleRgb(shifted - vec2(t * 0.02, 0.0))) / 3.0;
+                color = c;
+            }
+        } else if (uWipeMode == 7) {
+            // Light leak: warm glow rides the entering edge.
+            if (uv.x > uWipe) {
+                alpha = 0.0;
+            } else {
+                float band = exp(-pow((uWipe - uv.x) * 5.0, 2.0));
+                color += vec3(1.0, 0.55, 0.2) * band * 0.7 * (0.4 + 0.6 * uWipe);
+            }
+        } else if (uWipeMode == 8) {
+            // Diagonal soft wipe (mask wipe).
+            float d = (uv.x + (1.0 - uv.y)) * 0.5;
+            alpha *= smoothstep(uWipe + 0.15, uWipe - 0.15, d);
         } else {
             if (uv.x > uWipe) alpha = 0.0;
         }

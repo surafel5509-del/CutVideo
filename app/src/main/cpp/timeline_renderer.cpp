@@ -176,10 +176,23 @@ AnimationState sampleTransition(TransitionType type, float progress) {
         case TransitionType::kGlitch:
             s.alpha = t;
             s.translateX = std::sin(t * 60.0f) * (1.0f - t) * 0.04f;
+            s.wipe = t;
             break;
         case TransitionType::kBlur:
             s.alpha = t;
             s.blurRadiusPx = (1.0f - t) * 20.0f;
+            break;
+        case TransitionType::kFlash:
+            s.wipe = t;
+            break;
+        case TransitionType::kWhipPan:
+            s.wipe = t;
+            break;
+        case TransitionType::kLightLeak:
+            s.wipe = t;
+            break;
+        case TransitionType::kMaskWipe:
+            s.wipe = t;
             break;
     }
     return s;

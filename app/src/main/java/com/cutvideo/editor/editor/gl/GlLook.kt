@@ -138,9 +138,9 @@ object GlLookFactory {
             chromaSpill = clip.chroma.spill,
             alpha = animation?.alpha ?: 1f,
             wipe = animation?.wipe ?: 1f,
-            wipeMode = if (clip.transitionIn?.type == com.cutvideo.editor.domain.model.TransitionType.CIRCLE ||
-                clip.transitionOut?.type == com.cutvideo.editor.domain.model.TransitionType.CIRCLE
-            ) 1 else 0,
+            wipeMode = com.cutvideo.editor.editor.AnimationEngine.wipeMode(
+                clip.transitionIn?.type ?: clip.transitionOut?.type
+            ),
             timeSeconds = timelineUs / 1_000_000f,
             aspect = aspect.ratio,
             chain = chain,

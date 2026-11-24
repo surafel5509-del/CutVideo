@@ -351,9 +351,8 @@ private fun EffectsPanel(
         Spacer(Modifier.height(6.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(EffectsCatalog.all(), key = { it.id }) { preset ->
-                val pro = preset.id in setOf(
-                    "gaussian_blur", "glow", "bloom_pro", "drop_shadow", "vignette_pro", "grain_pro"
-                )
+                // Engine effects (slots ≥ 24) render only in the GPU chain — no CPU thumbnail path.
+                val pro = com.cutvideo.editor.nativebridge.NativeEffectIds.idOf(preset.id) >= 24
                 val preview = if (pro) null else rememberLookPreview(
                     source = source,
                     clip = clip,
@@ -529,6 +528,25 @@ private fun EffectStackRow(
                         }
                         KeyframeDot(active = false) { vm.addEffectParamKeyframe(spec.instanceId, param.key) }
                     }
+                }
+
+                // .cube LUT: file import row (the effect renders whatever LUT is bound).
+                if (spec.id == "cube_lut") {
+                    Spacer(Modifier.height(8.dp))
+                    val lutPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+                    ) { uri -> if (uri != null) vm.importEffectLut(spec.instanceId, uri) }
+                    Text(
+                        if (spec.lutPath.isBlank()) "No LUT loaded — the frame passes through unchanged."
+                        else "LUT: ${java.io.File(spec.lutPath).name}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CutColors.TextTertiary
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    GhostButton(
+                        text = if (spec.lutPath.isBlank()) "Import .cube LUT" else "Replace LUT",
+                        onClick = { lutPicker.launch(arrayOf("*/*")) }
+                    )
                 }
                 Spacer(Modifier.height(4.dp))
             }

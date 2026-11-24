@@ -362,7 +362,7 @@ void testTimeline() {
               "animation " + std::to_string(i) + " ends fully opaque");
         check(s.scale > 0.0f, "animation " + std::to_string(i) + " keeps a positive scale");
     }
-    for (int i = 0; i <= static_cast<int>(TransitionType::kBlur); ++i) {
+    for (int i = 0; i <= static_cast<int>(TransitionType::kMaskWipe); ++i) {
         const AnimationState s = sampleTransition(static_cast<TransitionType>(i), 1.0f);
         check(s.alpha >= 0.999f && s.wipe >= 0.999f && std::fabs(s.translateX) < 0.001f &&
                   std::fabs(s.translateY) < 0.001f,

@@ -17,8 +17,10 @@ import com.cutvideo.editor.editor.EditorController
 import com.cutvideo.editor.editor.PreviewController
 import com.cutvideo.editor.editor.PreviewState
 import com.cutvideo.editor.ui.components.TimelineZoom
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -417,6 +419,31 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
     fun setEffectBlend(instanceId: String, blend: com.cutvideo.editor.domain.model.BlendMode) =
         withSelectedClip { editor.setEffectBlend(it.id, instanceId, blend) }
 
+    /** Copies an imported `.cube` file into app storage and binds it to a `cube_lut` effect. */
+    fun importEffectLut(instanceId: String, uri: Uri) {
+        val clipId = editor.selectedClipId.value ?: return
+        viewModelScope.launch {
+            val ok: String? = withContext(Dispatchers.IO) {
+                runCatching {
+                    val dir = java.io.File(container.appContext.filesDir, "luts").apply { mkdirs() }
+                    val out = java.io.File(dir, "lut-${System.currentTimeMillis()}.cube")
+                    val stream = container.appContext.contentResolver.openInputStream(uri)
+                        ?: return@runCatching null
+                    stream.use { input -> out.outputStream().use { input.copyTo(it) } }
+                    // Validate before binding so a bad file never reaches the shader.
+                    com.cutvideo.editor.editor.effects.CubeLuts.parse(out.readText())
+                    out.absolutePath
+                }.getOrNull()
+            }
+            if (ok != null) {
+                editor.setEffectLutPath(clipId, instanceId, ok)
+                _message.value = "LUT applied"
+            } else {
+                _message.value = "Could not read that .cube LUT"
+            }
+        }
+    }
+
     fun applyEffectStack(stackId: String) = withSelectedClip { editor.applyEffectStack(it.id, stackId) }
 
     fun clearEffects() = withSelectedClip { editor.clearEffects(it.id) }
@@ -427,6 +454,57 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
 
     fun deleteEffectParamKeyframe(instanceId: String, param: String) =
         withSelectedClip { editor.deleteEffectKeyframe(it.id, instanceId, param, clipLocalPlayhead(it)) }
+
+    /**
+     * Motion tracking: samples analysis frames of the selected clip, tracks the central ROI with
+     * [com.cutvideo.editor.editor.tracking.MotionTracker], and writes the result as
+     * POSITION_X/Y keyframes. Real analysis on real frames — slow-ish on long clips, so it runs
+     * off the main thread with a capped frame budget.
+     */
+    fun trackMotion() {
+        val clip = editor.selectedClip ?: doc.value?.videoClips()?.firstOrNull()
+        if (clip == null || clip.uri.isBlank()) {
+            _message.value = "Select a video clip to track"
+            return
+        }
+        _message.value = "Tracking motion…"
+        viewModelScope.launch {
+            val keys = withContext(Dispatchers.Default) {
+                runCatching {
+                    val durationUs = clip.durationUs.coerceAtLeast(1L)
+                    val frameCount = 96
+                    val stepUs = (durationUs / frameCount).coerceIn(60_000L, 1_000_000L)
+                    val frames = ArrayList<com.cutvideo.editor.editor.tracking.TrackFrame>()
+                    var t = 0L
+                    while (t < durationUs && frames.size < frameCount) {
+                        val sourceUs = clip.sourceInUs + (t * clip.speed.coerceAtLeast(0.05f)).toLong()
+                        val bitmap = container.thumbnailStore.frame(clip.uri, sourceUs, 160) ?: break
+                        val w = 96
+                        val h = (bitmap.height * w / bitmap.width).coerceAtLeast(2)
+                        val small = android.graphics.Bitmap.createScaledBitmap(bitmap, w, h, true)
+                        val pixels = IntArray(w * h)
+                        small.getPixels(pixels, 0, w, 0, 0, w, h)
+                        val luma = FloatArray(w * h) { i ->
+                            val p = pixels[i]
+                            (((p shr 16) and 0xFF) * 0.2126f + ((p shr 8) and 0xFF) * 0.7152f +
+                                (p and 0xFF) * 0.0722f) / 255f
+                        }
+                        frames += com.cutvideo.editor.editor.tracking.TrackFrame(t, luma, w, h)
+                        t += stepUs
+                    }
+                    com.cutvideo.editor.editor.tracking.MotionTracker.track(
+                        frames, roiXFrac = 0.3f, roiYFrac = 0.3f, roiWFrac = 0.4f, roiHFrac = 0.4f
+                    ).filter { it.confidence > 0.08f }
+                }.getOrElse { emptyList() }
+            }
+            if (keys.size < 2) {
+                _message.value = "Motion tracking found no reliable motion"
+            } else {
+                editor.applyMotionTrack(clip.id, keys)
+                _message.value = "Tracked ${keys.size} points — position keyframes added"
+            }
+        }
+    }
 
     /** Playhead relative to the selected clip's start (keyframe times are clip-local). */
     fun clipLocalPlayhead(clip: Clip): Long =

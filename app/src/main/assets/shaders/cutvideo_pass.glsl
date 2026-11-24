@@ -31,6 +31,10 @@ uniform vec2 uCombineW;       // combine weights (scale-1, scale-2)
 uniform vec3 uDuotoneShadow;
 uniform vec3 uDuotoneHighlight;
 
+// .cube LUT: tiled 2D texture (size*size wide, size tall), 0 = none bound.
+uniform sampler2D uLutTexture;
+uniform float uLutSize;
+
 const float PI = 3.14159265359;
 
 // --- stages -----------------------------------------------------------------------------------------
@@ -59,6 +63,66 @@ float luma(vec3 c) {
 
 vec3 sampleA(vec2 uv) {
     return texture(uTexA, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
+}
+
+// --- colour helpers ---------------------------------------------------------------------------------
+
+vec3 hueToRgb(float h) {
+    float r = abs(h * 6.0 - 3.0) - 1.0;
+    float g = 2.0 - abs(h * 6.0 - 2.0);
+    float b = 2.0 - abs(h * 6.0 - 4.0);
+    return clamp(vec3(r, g, b), 0.0, 1.0);
+}
+
+void rgbToHsl(vec3 c, out float h, out float s, out float l) {
+    float maxc = max(c.r, max(c.g, c.b));
+    float minc = min(c.r, min(c.g, c.b));
+    l = (maxc + minc) * 0.5;
+    float d = maxc - minc;
+    if (d < 0.0001) {
+        h = 0.0;
+        s = 0.0;
+        return;
+    }
+    s = l > 0.5 ? d / (2.0 - maxc - minc) : d / (maxc + minc);
+    if (maxc == c.r) {
+        h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+    } else if (maxc == c.g) {
+        h = (c.b - c.r) / d + 2.0;
+    } else {
+        h = (c.r - c.g) / d + 4.0;
+    }
+    h /= 6.0;
+}
+
+float hue2rgb(float p, float q, float t) {
+    if (t < 0.0) t += 1.0;
+    if (t > 1.0) t -= 1.0;
+    if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
+    if (t < 0.5) return q;
+    if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    return p;
+}
+
+vec3 hslToRgb(float h, float s, float l) {
+    if (s < 0.0001) return vec3(l);
+    float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+    float p = 2.0 * l - q;
+    return vec3(hue2rgb(p, q, h + 1.0 / 3.0), hue2rgb(p, q, h), hue2rgb(p, q, h - 1.0 / 3.0));
+}
+
+// Tiled .cube LUT lookup: blue slices are laid out along X (slice b at x in [b*size, (b+1)*size)).
+vec3 lutLookup(vec3 c) {
+    float size = max(uLutSize, 2.0);
+    float rf = clamp(c.r, 0.0, 1.0) * (size - 1.0);
+    float gf = clamp(c.g, 0.0, 1.0) * (size - 1.0);
+    float bf = clamp(c.b, 0.0, 1.0) * (size - 1.0);
+    float b0 = floor(bf);
+    float b1 = min(b0 + 1.0, size - 1.0);
+    vec2 dims = vec2(size * size, size);
+    vec2 uv0 = vec2(b0 * size + rf + 0.5, gf + 0.5) / dims;
+    vec2 uv1 = vec2(b1 * size + rf + 0.5, gf + 0.5) / dims;
+    return mix(texture(uLutTexture, uv0).rgb, texture(uLutTexture, uv1).rgb, bf - b0);
 }
 
 vec4 sampleA4(vec2 uv) {
@@ -249,6 +313,133 @@ vec3 effectColor(int id, vec3 color, vec2 uv) {
         float coarse = hash21(floor(uv * 256.0 / max(uP0.x, 0.05)) + 31.0);
         float amt = uStrength * 0.18 * (1.0 - 0.5 * uP0.z + uP0.z * coarse);
         return clamp(color + (n - 0.5) * 2.0 * amt, 0.0, 1.0);
+    } else if (id == 30) {   // lift / gamma / gain: p0 = liftR, liftG, liftB, gamma; p1 = gainR, gainG, gainB
+        vec3 c = color + vec3(uP0.x, uP0.y, uP0.z) * 0.5;
+        c = pow(max(c, vec3(0.0)), vec3(1.0 / max(uP0.w, 0.05)));
+        c = c * vec3(uP1.x, uP1.y, uP1.z);
+        return clamp(mix(color, clamp(c, 0.0, 1.0), uStrength), 0.0, 1.0);
+    } else if (id == 31) {   // RGB curves (parametric): p0 = shadows, midtones, highlights, contrast
+        float l = luma(color);
+        float curve = uP0.x * clamp(1.0 - l * 2.0, 0.0, 1.0)
+            + uP0.y * (1.0 - abs(l - 0.5) * 2.0)
+            + uP0.z * clamp(l * 2.0 - 1.0, 0.0, 1.0);
+        vec3 c = color + curve * 0.5;
+        c = (c - 0.5) * (1.0 + uP0.w) + 0.5;
+        return clamp(mix(color, clamp(c, 0.0, 1.0), uStrength), 0.0, 1.0);
+    } else if (id == 32) {   // colour wheels: p0 = shadowsHue, shadowsSat, midsHue, midsSat; p1 = highsHue, highsSat, balance
+        float l = luma(color);
+        vec3 shadowTint = hueToRgb(uP0.x) * uP0.y - vec3(uP0.y) * 0.33;
+        vec3 midTint = hueToRgb(uP0.z) * uP0.w - vec3(uP0.w) * 0.33;
+        vec3 highTint = hueToRgb(uP1.x) * uP1.y - vec3(uP1.y) * 0.33;
+        float shadowW = clamp(1.0 - l * 2.0, 0.0, 1.0);
+        float highW = clamp(l * 2.0 - 1.0, 0.0, 1.0);
+        float midW = clamp(1.0 - shadowW - highW, 0.0, 1.0);
+        vec3 tinted = color + (shadowTint * shadowW + midTint * midW + highTint * highW) * 0.35;
+        tinted *= 1.0 + uP1.z * 0.3 * (l - 0.5);
+        return clamp(mix(color, clamp(tinted, 0.0, 1.0), uStrength), 0.0, 1.0);
+    } else if (id == 33) {   // hue vs sat/lum: p0 = hueCenter, hueRange, hueShift; p1 = satAdjust, lumAdjust
+        float h, s, l2;
+        rgbToHsl(color, h, s, l2);
+        float d = abs(fract(h - uP0.x + 0.5) - 0.5);
+        float w = 1.0 - smoothstep(uP0.y * 0.5, max(uP0.y, 0.01), d);
+        h = fract(h + uP0.z * 0.5 * w);
+        s = clamp(s * (1.0 + uP1.x * w), 0.0, 1.0);
+        l2 = clamp(l2 * (1.0 + uP1.y * w), 0.0, 1.0);
+        return mix(color, hslToRgb(h, s, l2), uStrength);
+    } else if (id == 34) {   // film emulation: p0 = density, fade, warmth; p1 = saturation
+        vec3 c = (color - 0.5) * (1.0 + uP0.x) + 0.5;
+        c = mix(c, c * 0.85 + 0.12, clamp(uP0.y, 0.0, 1.0));
+        c.r += uP0.z * 0.08;
+        c.b -= uP0.z * 0.08;
+        float l = luma(c);
+        c = mix(vec3(l), c, 1.0 + uP1.x);
+        return clamp(mix(color, clamp(c, 0.0, 1.0), uStrength), 0.0, 1.0);
+    } else if (id == 35) {   // teal & orange: p0 = shadowTint, highlightTint, balance
+        float l = luma(color);
+        vec3 teal = vec3(-0.06, 0.02, 0.10);
+        vec3 orange = vec3(0.10, 0.03, -0.06);
+        float sw = clamp(1.0 - l * 1.6, 0.0, 1.0);
+        float hw = clamp(l * 1.6 - 0.6, 0.0, 1.0);
+        vec3 c = color + teal * sw * uP0.x * (1.0 + uP0.z) + orange * hw * uP0.y * (1.0 - uP0.z);
+        return clamp(mix(color, clamp(c, 0.0, 1.0), uStrength), 0.0, 1.0);
+    } else if (id == 36) {   // bleach bypass: p0 = contrast, desaturation
+        float l = luma(color);
+        vec3 c = (color - 0.5) * (1.0 + uP0.x * 1.2) + 0.5;
+        c = mix(c, vec3(l), clamp(uP0.y, 0.0, 1.0));
+        c = mix(vec3(luma(c)), c, 1.0 + uP0.x * 0.4);
+        return clamp(mix(color, clamp(c, 0.0, 1.0), uStrength), 0.0, 1.0);
+    } else if (id == 37) {   // .cube LUT (uses uLutTexture)
+        if (uLutSize < 1.5) return color;
+        return mix(color, lutLookup(color), uStrength);
+    } else if (id == 38) {   // RGB split: p0 = angle(turns), spread, radial
+        float a = uP0.x * 6.2831853;
+        vec2 dir = vec2(cos(a), sin(a)) * uP0.y * 0.01;
+        vec2 radial = (vTex - 0.5) * uP0.y * 0.02 * uP0.z;
+        vec2 d = dir + radial;
+        vec3 c;
+        c.r = sampleA(vTex + d).r;
+        c.g = color.g;
+        c.b = sampleA(vTex - d).b;
+        return mix(color, c, uStrength);
+    } else if (id == 39) {   // pixel sort: p0 = threshold, streak length, direction (0 horiz, 1 vert)
+        vec2 stepDir = uP0.z > 0.5 ? vec2(0.0, uTexelSize.y) : vec2(uTexelSize.x, 0.0);
+        float maxLen = uP0.y * 24.0;
+        vec3 best = color;
+        float bestL = luma(color);
+        for (int i = 1; i <= 8; ++i) {
+            float fi = float(i);
+            vec3 s1 = sampleA(vTex + stepDir * fi * 3.0);
+            vec3 s2 = sampleA(vTex - stepDir * fi * 3.0);
+            float l1 = luma(s1);
+            float l2v = luma(s2);
+            if (fi <= maxLen && l1 > bestL && l1 > uP0.x) {
+                best = s1;
+                bestL = l1;
+            }
+            if (fi <= maxLen && l2v > bestL && l2v > uP0.x) {
+                best = s2;
+                bestL = l2v;
+            }
+        }
+        return mix(color, best, uStrength);
+    } else if (id == 40) {   // datamosh: p0 = block density, smear, seed
+        vec2 block = floor(vTex * uP0.x + uP0.z) / max(uP0.x, 1.0);
+        float n = hash21(block * 3.1 + floor(uTime * 2.0));
+        vec2 shift = (vec2(n, hash21(block + 9.7)) - 0.5) * uP0.y * 0.12 * step(0.55, n);
+        vec3 c = sampleA(vTex + shift);
+        c = mix(c, sampleA(vTex + shift * 2.0), 0.5 * clamp(uP0.y, 0.0, 1.0));
+        return mix(color, c, uStrength);
+    } else if (id == 41) {   // liquid warp: p0 = amplitude, frequency, speed
+        vec2 p = vTex * uP0.y * 4.0;
+        float t = uTime * uP0.z;
+        vec2 warp = vec2(
+            sin(p.y * 2.1 + t) + 0.5 * sin(p.y * 4.7 - t * 1.3),
+            cos(p.x * 1.7 - t * 0.8) + 0.5 * cos(p.x * 3.9 + t)
+        ) * uTexelSize * uP0.x * 40.0;
+        return mix(color, sampleA(vTex + warp), uStrength);
+    } else if (id == 42) {   // displacement: p0 = angle(turns), amount, scale
+        float a = uP0.x * 6.2831853;
+        float wave = sin((vTex.x * cos(a) + vTex.y * sin(a)) * uP0.z * 20.0 + uTime);
+        vec2 d = vec2(cos(a), sin(a)) * wave * uP0.y * 0.02;
+        return mix(color, sampleA(vTex + d), uStrength);
+    } else if (id == 43) {   // motion blur: p0 = angle(turns), distance
+        float a = uP0.x * 6.2831853;
+        vec2 dir = vec2(cos(a), sin(a)) * uP0.y * 0.02;
+        vec3 acc = color;
+        for (int i = 1; i <= 6; ++i) {
+            float t = float(i) / 6.0;
+            acc += sampleA(vTex + dir * t);
+            acc += sampleA(vTex - dir * t);
+        }
+        return mix(color, acc / 13.0, uStrength);
+    } else if (id == 44) {   // radial / zoom motion: p0 = centerX, centerY, strength
+        vec2 c0 = vec2(uP0.x, uP0.y);
+        vec3 acc = color;
+        for (int i = 1; i <= 6; ++i) {
+            float s = 1.0 - uP0.z * 0.08 * (float(i) / 6.0);
+            acc += sampleA((vTex - c0) * s + c0);
+        }
+        return mix(color, acc / 7.0, uStrength);
     }
     return color;
 }
