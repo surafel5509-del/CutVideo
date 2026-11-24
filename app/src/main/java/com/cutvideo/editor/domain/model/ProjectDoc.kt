@@ -170,7 +170,6 @@ data class FilterSpec(val id: String = FilterCatalog.NONE, val intensity: Float 
     val isActive: Boolean get() = id != FilterCatalog.NONE && intensity > 0.001f
 }
 
-@Serializable
 /**
  * One effect instance on a clip.
  *

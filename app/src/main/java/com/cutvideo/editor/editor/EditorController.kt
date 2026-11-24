@@ -1149,8 +1149,8 @@ class EditorController(
 
     val currentProjectId: String? get() = openedProjectId
 
-    private companion object {
-        /** `uEffectIds[4]` in the shader and the native effect stack both hold four entries. */
+    companion object {
+        /** Upper bound on one clip's effect chain (GPU passes scale with chain length). */
         const val MAX_EFFECTS = 12
 
         const val TAG = "EditorController"

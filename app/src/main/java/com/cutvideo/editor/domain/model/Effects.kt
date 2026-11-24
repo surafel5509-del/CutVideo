@@ -1,6 +1,7 @@
 package com.cutvideo.editor.domain.model
 
 import androidx.compose.ui.graphics.Color
+import kotlinx.serialization.Serializable
 
 /**
  * The effect engine's catalog: one [EffectDef] per effect, declaring the *meaningful* professional
