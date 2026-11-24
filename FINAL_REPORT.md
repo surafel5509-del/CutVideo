@@ -257,3 +257,37 @@ in this workflow); pixel-level preview-vs-export comparisons remain **not verifi
   includes new CubeLutTest + MotionTrackerTest + extended slot pins), APK artifact uploaded.
 - CI now posts failing test names to commit comments on failure (proven useful this cycle: caught
   a signed-ByteArray comparison bug in a new test that static analysis missed).
+
+---
+
+# Device bug fix: black preview / "No video clips to play" (run 45462909343, CI green at `d0aee14`)
+
+Reported from a real device (screenshot): timeline showed the imported clip and thumbnails, but the
+preview stayed black and the play button answered "Preview error: No video clips to play".
+
+## Root cause (deterministic, proven by code trace)
+`EditorViewModel.open()` set `structureSignature` **before** the `editor.doc` collector processed the
+first emission (StateFlow emissions resume collectors via dispatch — always later than the rest of
+the opening coroutine). The collector then compared signatures, saw "unchanged", and took the
+`refreshLook` branch — so `preview.setDocument(...)` was **never called when opening a saved
+project**. The timeline reads `editor.doc` directly (hence clips + thumbnails), while the singleton
+`PreviewController` kept an empty playlist: black `PlayerView`, and `play()`'s guard (correctly)
+reported no video clips. The stale "buffering" chip was `PreviewState` surviving across ViewModel
+recreations with no reset path.
+
+## Fixes
+1. `EditorViewModel.open()` binds `preview.setDocument(document, playhead)` explicitly after load
+   (mirrors `createProject`), removing the race at its source.
+2. `PreviewController.play()` self-heals: if its playlist is empty it rebuilds from the live session
+   document (`documentProvider` wired in `AppContainer`) before ever reporting an error — the play
+   button can no longer dead-end on controller state that disagrees with the document.
+3. State hygiene: the empty-playlist path resets `buffering`/`error`; `STATE_READY` clears stale
+   error banners; player IO/decoder failures now surface as readable messages
+   ("Can't read this video file — try re-importing it from Media", "This device can't decode this
+   video format") instead of raw error-code names.
+
+## Verification honesty
+- CI green: assembleDebug + all JVM unit tests + native 136/136 + APK artifact.
+- The race fix is verified by code trace and compilation; **on-device confirmation is still
+  required** (this workflow has no Android device): open a saved project with a video, confirm the
+  first frame renders and the play button starts playback.
