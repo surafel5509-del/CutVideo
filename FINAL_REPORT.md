@@ -204,3 +204,56 @@ in this environment and remains outstanding.
 
 Commits on `arena/9ff4bf73-cutvideo`: `d04c4bf` (bug fixes), `f8f19ea` (tools), `b6bac12` (CI fixes +
 docs). CI run 45277844509 is green and uploads the debug APK artifact.
+
+---
+
+# Phases 2–4 report (run 45417024416, CI green at `3ab4b8e`)
+
+Same verification discipline as Phase 1: every claim below is what passed CI + host tests + code
+audit. On-device rendering verification is still outstanding across the board (no Android device
+in this workflow); pixel-level preview-vs-export comparisons remain **not verified**.
+
+## Play button (task: "fix the video play button") — root causes fixed
+1. `PreviewController.play()` now re-prepares from `Player.STATE_IDLE` (after a `PlaybackException`
+   the old play() could never start again — the button died permanently).
+2. Empty timeline now surfaces "No video clips to play" instead of silently doing nothing.
+3. `CutVideoGlEffect.drawFrame` is fully guarded: any pipeline failure degrades look-only →
+   pass-through, so a shader/draw problem can never kill playback again (the previous
+   crash→STATE_IDLE loop).
+4. Exported-videos Play: app now owns the open intent with a chooser fallback and reports
+   failures instead of swallowing them. Plus a speed divide-by-zero guard and made `drawBlit`
+   public for the fallback path.
+**Not device-verified**: that playback starts on a physical phone after these fixes.
+
+## Phase 2 — colour grading, LUTs, digital effects (15 new engine effects, slots 30–44)
+- Lift/Gamma/Gain, parametric RGB curves, colour wheels (shadow/mid/highlight hue+sat), hue-vs-sat/lum,
+  film emulation, teal & orange, bleach bypass — real per-channel colour maths in the GPU pass shader.
+- `.cube` LUT: complete parser (CubeLuts), trilinear sampling, blue-slice tile atlas, cached GL
+  texture upload in the chain renderer, file-picker import into app storage (validated before bind).
+- RGB split (directional + radial), pixel sort (luminance streaks), datamosh (block smear), liquid
+  (sin warp), displacement (wave warp).
+- Verified: JVM tests (parse/sample/tile), shader ES2-compat gates, slot-table pins.
+- **Not verified**: rendering on real frames/device, quality vs commercial colour tools.
+
+## Phase 3 — transitions, motion blur, speed ramping
+- 4 new transitions (Flash, Whip Pan, Light Leak, Soft Wipe) with dedicated shader wipe modes
+  (5–8) incl. glitch-cut edge tearing and blur-dissolve edge; glitch/blur cuts now use wipe edges
+  too. Kotlin ↔ C++ TransitionType parity kept append-only (native 136/136).
+- Motion Blur + Radial Motion effects (multi-tap directional/radial accumulation).
+- Speed ramping: verified complete end-to-end (SPEED keyframes → live `playbackParameters` +
+  export `RampedSpeedProvider`); existed from the earlier work.
+- **Not verified**: transition rendering on device, GPU cost of the new wipe modes on mid-tier GPUs.
+
+## Phase 4 — masks, chroma, rotoscope, motion tracking
+- Masks (circle/rect/linear/mirror/freehand, feather, invert, 2-stack), chroma key with spill
+  suppression, rotoscope = freehand masks + per-frame keyframes — all pre-existing and audited.
+- NEW MotionTracker: coarse-to-fine SAD block matching over analysis frames (pure Kotlin, JVM-tested
+  against synthetic translations with exact recovery). "Track motion" in the Masks panel writes real
+  POSITION_X/Y keyframes (undoable); ROI = central 40% of the frame.
+- **Not verified**: tracker quality on real handheld footage (drift, occlusion), device performance.
+
+## CI evidence (run 45417024416)
+- Native engine tests 136/136 (host), assembleDebug success, JVM unit tests green (≥ 20 gate;
+  includes new CubeLutTest + MotionTrackerTest + extended slot pins), APK artifact uploaded.
+- CI now posts failing test names to commit comments on failure (proven useful this cycle: caught
+  a signed-ByteArray comparison bug in a new test that static analysis missed).
