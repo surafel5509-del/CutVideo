@@ -53,7 +53,9 @@ data class PreviewState(
 @UnstableApi
 class PreviewController(
     context: Context,
-    private val nativeEngine: NativeEngine
+    private val nativeEngine: NativeEngine,
+    /** Live session document; lets [play] rebuild a stale/empty playlist instead of failing. */
+    private val documentProvider: () -> ProjectDoc? = { null }
 ) {
 
     private val appContext = context.applicationContext
@@ -122,12 +124,29 @@ class PreviewController(
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                _state.value = _state.value.copy(buffering = playbackState == Player.STATE_BUFFERING)
+                _state.value = _state.value.copy(
+                    buffering = playbackState == Player.STATE_BUFFERING,
+                    // A stale error banner ("Preview error: …") must not outlive a healthy player.
+                    error = if (playbackState == Player.STATE_READY) null else _state.value.error
+                )
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "preview error", error)
-                _state.value = _state.value.copy(error = error.errorCodeName)
+                val message = when (error.errorCode) {
+                    PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+                    PlaybackException.ERROR_CODE_IO_NO_PERMISSION,
+                    PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ->
+                        "Can't read this video file — try re-importing it from Media"
+                    PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+                    PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+                    PlaybackException.ERROR_CODE_DECODING_FAILED ->
+                        "This device can't decode this video format"
+                    else -> error.errorCodeName
+                }
+                _state.value = _state.value.copy(error = message)
             }
 
             override fun onPositionDiscontinuity(
@@ -171,7 +190,9 @@ class PreviewController(
             _state.value = _state.value.copy(
                 durationUs = document.durationUs,
                 positionUs = 0L,
-                activeClipId = null
+                activeClipId = null,
+                buffering = false,
+                error = null
             )
             stopFollowers()
             return
@@ -210,9 +231,23 @@ class PreviewController(
 
     fun play() {
         if (videoClips.isEmpty()) {
+            // Self-heal: this controller may have missed a document binding (the doc collector and
+            // project open race used to leave the playlist empty while the timeline had clips —
+            // black screen + "No video clips to play"). Rebuild from the live document first.
+            val live = doc ?: documentProvider()
+            val playable = live?.tracks
+                ?.filter { it.type == TrackType.VIDEO }
+                ?.flatMap { it.sortedClips }
+                ?.any { it.uri.isNotBlank() } == true
+            if (live != null && playable) {
+                setDocument(live, _state.value.positionUs)
+            }
+        }
+        if (videoClips.isEmpty()) {
             _state.value = _state.value.copy(error = "No video clips to play")
             return
         }
+        _state.value = _state.value.copy(error = null)
         // A PlaybackException leaves the player in STATE_IDLE, where playWhenReady alone never
         // starts playback again — the play button would silently die. Re-prepare first.
         if (player.playbackState == Player.STATE_IDLE) {

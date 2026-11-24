@@ -64,7 +64,13 @@ class AppContainer(context: Context) {
     }
 
     val previewController: PreviewController by lazy {
-        PreviewController(appContext, nativeEngine)
+        PreviewController(
+            context = appContext,
+            nativeEngine = nativeEngine,
+            // Belt and braces: if the preview ever misses a document binding (ViewModel/doc
+            // emission race), play() can rebuild its playlist from the live session document.
+            documentProvider = { editorController.doc.value }
+        )
     }
 
     /** Set when a project document is too large / not yet ready; drives the recovery banner. */

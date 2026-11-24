@@ -115,7 +115,12 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
         openedId = projectId
         viewModelScope.launch {
             editor.open(projectId) { notice -> _message.value = notice }
-            structureSignature = structuralSignature(editor.doc.value ?: return@launch)
+            val document = editor.doc.value ?: return@launch
+            structureSignature = structuralSignature(document)
+            // Bind the preview explicitly. The collector below skips same-signature documents, and
+            // its first emission races the assignment above — which left the preview player with no
+            // media whenever a saved project was opened (black screen, "No video clips to play").
+            preview.setDocument(document, editor.playheadUs.value)
             loadFilterSource()
         }
     }
