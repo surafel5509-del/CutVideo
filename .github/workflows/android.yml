@@ -85,6 +85,38 @@ jobs:
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
 
+      # Ground truth on failure: which tests failed and their messages, as a commit comment
+      # (the job log is the only other place this appears).
+      - name: Report unit test failures
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(app/build/test-results/testDebugUnitTest/*.xml)
+          {
+            echo "### CutVideo unit test failures"
+            echo ""
+            echo '```'
+            for f in "${files[@]}"; do
+              if grep -q 'failures="[1-9]\|errors="[1-9]' "$f"; then
+                echo "== $(basename "$f")"
+                python3 - "$f" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          for case in root.iter('testcase'):
+              for bad in list(case.iter('failure')) + list(case.iter('error')):
+                  print(f"FAIL {case.get('classname')} :: {case.get('name')}")
+                  msg = (bad.get('message') or '')[:600]
+                  print(f"  {msg}")
+          PY
+              fi
+            done
+            if [ ${#files[@]} -eq 0 ]; then echo "no test XML produced"; fi
+            echo '```'
+          } > testcomment.md
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@testcomment.md > /dev/null || true
+
       # Proof (in the run log) that the JVM tests were actually executed, not skipped:
       # a missing report or any failure/error fails the job.
       - name: Unit test summary
