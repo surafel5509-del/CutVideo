@@ -209,35 +209,14 @@ object FilterCatalog {
 }
 
 object EffectsCatalog {
-    val presets: List<EffectPreset> = listOf(
-        EffectPreset("none", "None", "Basic", "Clean frame, no effect", Color(0xFFA1A1AA), 0f),
-        EffectPreset("grain", "Film Grain", "Texture", "Animated silver-halide grain", Color(0xFFD6D3D1)),
-        EffectPreset("vignette", "Vignette", "Light", "Darkens the frame edges", Color(0xFF7C3AED)),
-        EffectPreset("scanlines", "Scanlines", "Texture", "CRT line structure", Color(0xFF22D3EE)),
-        EffectPreset("glitch", "Glitch", "Distort", "RGB channel tearing", Color(0xFFF43F5E), premium = true),
-        EffectPreset("chroma_aberration", "Chromatic", "Distort", "Lens colour fringing", Color(0xFFA855F7)),
-        EffectPreset("bloom", "Bloom", "Light", "Soft highlight glow", Color(0xFFFDE68A)),
-        EffectPreset("light_leak", "Light Leak", "Light", "Warm film leak from the edge", Color(0xFFFB923C)),
-        EffectPreset("pulse", "Pulse", "Motion", "Breathing exposure", Color(0xFFEC4899)),
-        EffectPreset("mirror", "Mirror", "Distort", "Kaleidoscope mirror", Color(0xFF60A5FA)),
-        EffectPreset("posterize", "Posterize", "Stylise", "Reduced colour steps", Color(0xFF34D399)),
-        EffectPreset("duotone", "Duotone", "Stylise", "Two-colour gradient map", Color(0xFF818CF8)),
-        EffectPreset("sharpen", "Sharpen", "Detail", "Edge enhancement", Color(0xFFFACC15)),
-        EffectPreset("vhs", "VHS", "Retro", "Tape wobble and noise", Color(0xFFF472B6), premium = true),
-        EffectPreset("snow", "Snow", "Particles", "Drifting particles", Color(0xFFE0F2FE), premium = true),
-        EffectPreset("zoom_blur", "Zoom Blur", "Motion", "Radial motion blur", Color(0xFFA3E635)),
-        // --- second wave ----------------------------------------------------------------
-        EffectPreset("blur", "Blur", "Blur", "Softens the whole frame", Color(0xFF94A3B8)),
-        EffectPreset("pixelate", "Pixelate", "Stylise", "Mosaic blocks", Color(0xFF22D3EE)),
-        EffectPreset("neon", "Neon", "Stylise", "Edge glow outlines", Color(0xFF00E5FF), premium = true),
-        EffectPreset("halftone", "Halftone", "Print", "Newspaper dot pattern", Color(0xFFE5E7EB)),
-        EffectPreset("tilt_shift", "Tilt Shift", "Blur", "Miniature focus band", Color(0xFF0EA5E9)),
-        EffectPreset("old_film", "Old Film", "Retro", "Sepia, scratches and flicker", Color(0xFFD97706), premium = true),
-        EffectPreset("heat_wave", "Heat Wave", "Distort", "Rising air distortion", Color(0xFFF97316)),
-        EffectPreset("spotlight", "Spotlight", "Light", "Pool of light on the subject", Color(0xFFFACC15))
-    )
+    /**
+     * The single source of truth is now `EffectCatalog` (the effects engine catalog in
+     * `Effects.kt`); this object keeps the legacy API shape so existing panels and the
+     * `NativeEffectIds` guard keep working unchanged.
+     */
+    val presets: List<EffectPreset> get() = EffectCatalog.presets
 
-    private val byId = presets.associateBy { it.id }
+    private val byId by lazy { presets.associateBy { it.id } }
     fun preset(id: String): EffectPreset = byId[id] ?: presets.first()
     fun groups(): List<String> = presets.map { it.group }.distinct()
     fun all(): List<EffectPreset> = presets.filter { it.id != "none" }

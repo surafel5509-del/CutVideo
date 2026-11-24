@@ -396,6 +396,38 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
     fun clearKeyframes(property: com.cutvideo.editor.domain.model.KeyframeProperty? = null) =
         withSelectedClip { editor.clearKeyframes(it.id, property) }
 
+    // --- effect chain (ordered stack, per-effect parameters) --------------------------------------
+
+    fun addEffect(effectId: String) = withSelectedClip { editor.addEffect(it.id, effectId) }
+
+    fun removeEffect(instanceId: String) = withSelectedClip { editor.removeEffect(it.id, instanceId) }
+
+    fun moveEffect(instanceId: String, delta: Int) = withSelectedClip { editor.moveEffect(it.id, instanceId, delta) }
+
+    fun duplicateEffect(instanceId: String) = withSelectedClip { editor.duplicateEffect(it.id, instanceId) }
+
+    fun toggleEffectEnabled(instanceId: String) = withSelectedClip { editor.toggleEffectEnabled(it.id, instanceId) }
+
+    fun setEffectParam(instanceId: String, key: String, value: Float, live: Boolean = true) =
+        withSelectedClip { editor.setEffectParam(it.id, instanceId, key, value, live) }
+
+    fun setEffectIntensityFor(instanceId: String, value: Float, live: Boolean = true) =
+        withSelectedClip { editor.setEffectIntensityById(it.id, instanceId, value, live) }
+
+    fun setEffectBlend(instanceId: String, blend: com.cutvideo.editor.domain.model.BlendMode) =
+        withSelectedClip { editor.setEffectBlend(it.id, instanceId, blend) }
+
+    fun applyEffectStack(stackId: String) = withSelectedClip { editor.applyEffectStack(it.id, stackId) }
+
+    fun clearEffects() = withSelectedClip { editor.clearEffects(it.id) }
+
+    /** [param] empty targets the effect's intensity; otherwise that parameter. */
+    fun addEffectParamKeyframe(instanceId: String, param: String) =
+        withSelectedClip { editor.addEffectKeyframe(it.id, instanceId, param, clipLocalPlayhead(it)) }
+
+    fun deleteEffectParamKeyframe(instanceId: String, param: String) =
+        withSelectedClip { editor.deleteEffectKeyframe(it.id, instanceId, param, clipLocalPlayhead(it)) }
+
     /** Playhead relative to the selected clip's start (keyframe times are clip-local). */
     fun clipLocalPlayhead(clip: Clip): Long =
         (playheadUs.value - clip.startUs).coerceIn(0L, clip.durationUs)

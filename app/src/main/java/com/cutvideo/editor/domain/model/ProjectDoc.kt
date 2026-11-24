@@ -171,7 +171,27 @@ data class FilterSpec(val id: String = FilterCatalog.NONE, val intensity: Float 
 }
 
 @Serializable
-data class EffectSpec(val id: String, val intensity: Float = 0.5f)
+/**
+ * One effect instance on a clip.
+ *
+ * The list order on [Clip.effects] is the render order — the engine processes effects strictly in
+ * sequence (the "effect graph" is an ordered chain, like a compositing stack). [params] holds the
+ * professional controls declared by `EffectCatalog.def(id)`; missing keys fall back to the
+ * definition's defaults, so documents written before the engine upgrade load unchanged.
+ */
+@Serializable
+data class EffectSpec(
+    val id: String,
+    val intensity: Float = 0.5f,
+    val params: Map<String, Float> = emptyMap(),
+    val blend: BlendMode = BlendMode.NORMAL,
+    val enabled: Boolean = true,
+    /** Stable identity for keyframe targeting and duplication. */
+    val instanceId: String = Ids.newId("fx")
+) {
+    /** Effective value of one parameter: keyframed overrides (see `EffectChain`) use [paramAt]. */
+    fun param(key: String): Float = params[key] ?: EffectCatalog.paramDef(id, key)?.default ?: 0f
+}
 
 @Serializable
 data class ChromaKeySpec(

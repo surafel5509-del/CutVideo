@@ -21,18 +21,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +55,7 @@ import com.cutvideo.editor.core.TimeText
 import com.cutvideo.editor.domain.model.AnimationCatalog
 import com.cutvideo.editor.domain.model.Clip
 import com.cutvideo.editor.domain.model.ClipAnimationType
+import com.cutvideo.editor.domain.model.EffectCatalog
 import com.cutvideo.editor.domain.model.EffectsCatalog
 import com.cutvideo.editor.domain.model.FilterCatalog
 import com.cutvideo.editor.domain.model.ProjectDoc
@@ -320,12 +331,30 @@ private fun EffectsPanel(
     vm: EditorViewModel
 ) {
     if (clip == null) return NeedsClip()
-    val active = clip.effects.firstOrNull()
     Column {
+        // --- multi-effect preset stacks -------------------------------------------------------------
+        Text("PRESET STACKS", style = MaterialTheme.typography.labelSmall, color = CutColors.TextTertiary)
+        Spacer(Modifier.height(6.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(EffectCatalog.stacks, key = { it.id }) { stack ->
+                val applied = clip.effects.map { it.id } == stack.effects.map { it.id }
+                GhostButton(
+                    text = if (applied) "✓ ${stack.name}" else stack.name,
+                    onClick = { vm.applyEffectStack(stack.id) }
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // --- add effects (tap = append to the chain) -----------------------------------------------
+        Text("EFFECTS", style = MaterialTheme.typography.labelSmall, color = CutColors.TextTertiary)
+        Spacer(Modifier.height(6.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(EffectsCatalog.all(), key = { it.id }) { preset ->
-                val applied = clip.effects.any { it.id == preset.id }
-                val preview = rememberLookPreview(
+                val pro = preset.id in setOf(
+                    "gaussian_blur", "glow", "bloom_pro", "drop_shadow", "vignette_pro", "grain_pro"
+                )
+                val preview = if (pro) null else rememberLookPreview(
                     source = source,
                     clip = clip,
                     aspect = doc.aspect,
@@ -336,31 +365,223 @@ private fun EffectsPanel(
                 EffectCard(
                     preset = preset,
                     preview = preview,
-                    applied = applied,
-                    onClick = { vm.toggleEffect(preset.id, preset.defaultIntensity) }
+                    applied = clip.effects.any { it.id == preset.id },
+                    onClick = { vm.addEffect(preset.id) },
+                    previewAvailable = !pro
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
+
+        Spacer(Modifier.height(12.dp))
         Text(
-            "Up to 4 effects stack per clip (GPU limit). Applied in the order you tap them.",
+            "Chain renders top to bottom — up to ${com.cutvideo.editor.editor.EditorController.MAX_EFFECTS} effects per clip.",
             style = MaterialTheme.typography.bodySmall,
             color = CutColors.TextTertiary
         )
-        if (active != null) {
-            Spacer(Modifier.height(6.dp))
-            ValueSlider(
-                label = "Strength • ${EffectsCatalog.preset(active.id).name}",
-                value = active.intensity,
-                valueRange = 0f..1f,
-                defaultValue = 0.5f,
-                format = { "${(it * 100).roundToInt()}%" },
-                onValueChange = { vm.setEffectIntensity(active.id, it) }
+        Spacer(Modifier.height(8.dp))
+
+        // --- the ordered chain inspector ------------------------------------------------------------
+        if (clip.effects.isEmpty()) {
+            Text(
+                "No effects on this clip. Tap a card above to add one.",
+                style = MaterialTheme.typography.bodySmall,
+                color = CutColors.TextTertiary
             )
         }
-        Spacer(Modifier.height(6.dp))
-        GhostButton("Clear effects", onClick = { vm.updateAdjustments(live = false) { it.copy(effects = emptyList()) } })
+        clip.effects.forEachIndexed { index, spec ->
+            EffectStackRow(
+                spec = spec,
+                index = index,
+                count = clip.effects.size,
+                clip = clip,
+                vm = vm
+            )
+        }
+
+        if (clip.effects.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            GhostButton("Clear effects", onClick = { vm.clearEffects() })
+        }
     }
+}
+
+@Composable
+private fun EffectStackRow(
+    spec: com.cutvideo.editor.domain.model.EffectSpec,
+    index: Int,
+    count: Int,
+    clip: Clip,
+    vm: EditorViewModel
+) {
+    val def = EffectCatalog.def(spec.id)
+    var expanded by remember(spec.instanceId) { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(CutColors.SurfaceHigh)
+            .border(1.dp, CutColors.Border, RoundedCornerShape(14.dp))
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+        ) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(def.accent)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(
+                Modifier
+                    .weight(1f)
+                    .clickable { expanded = !expanded }
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        def.name,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (spec.enabled) CutColors.TextPrimary else CutColors.TextTertiary
+                    )
+                    if (!spec.enabled) {
+                        Text("  off", style = MaterialTheme.typography.labelSmall, color = CutColors.TextTertiary)
+                    }
+                }
+                Text(
+                    "${def.category.label} • ${index + 1} of $count in chain",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = CutColors.TextTertiary
+                )
+            }
+            IconAction(
+                if (spec.enabled) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                if (spec.enabled) "Disable effect" else "Enable effect"
+            ) { vm.toggleEffectEnabled(spec.instanceId) }
+            IconAction(Icons.Rounded.ArrowUpward, "Move up", enabled = index > 0) {
+                vm.moveEffect(spec.instanceId, -1)
+            }
+            IconAction(Icons.Rounded.ArrowDownward, "Move down", enabled = index < count - 1) {
+                vm.moveEffect(spec.instanceId, 1)
+            }
+            IconAction(Icons.Rounded.ContentCopy, "Duplicate") { vm.duplicateEffect(spec.instanceId) }
+            IconAction(Icons.Rounded.Delete, "Remove") { vm.removeEffect(spec.instanceId) }
+            IconAction(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, "Details") {
+                expanded = !expanded
+            }
+        }
+
+        if (expanded) {
+            Column(Modifier.padding(horizontal = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        ValueSlider(
+                            label = "Amount",
+                            value = spec.intensity,
+                            valueRange = 0f..1f,
+                            defaultValue = def.defaultIntensity,
+                            format = { "${(it * 100).roundToInt()}%" },
+                            onValueChange = { vm.setEffectIntensityFor(spec.instanceId, it) }
+                        )
+                    }
+                    KeyframeDot(active = false) { vm.addEffectParamKeyframe(spec.instanceId, "") }
+                }
+
+                Spacer(Modifier.height(6.dp))
+                Text("BLEND", style = MaterialTheme.typography.labelSmall, color = CutColors.TextTertiary)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(com.cutvideo.editor.domain.model.BlendMode.entries.toList(), key = { it.name }) { mode ->
+                        val selected = spec.blend == mode
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) CutColors.Accent else CutColors.SurfaceHighest)
+                                .border(
+                                    1.dp,
+                                    if (selected) CutColors.Accent else CutColors.Border,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { vm.setEffectBlend(spec.instanceId, mode) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                mode.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (selected) Color.White else CutColors.TextSecondary
+                            )
+                        }
+                    }
+                }
+
+                def.params.forEach { param ->
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            ValueSlider(
+                                label = param.label,
+                                value = spec.param(param.key),
+                                valueRange = param.min..param.max,
+                                defaultValue = param.default,
+                                format = { formatParam(it, param.unit) },
+                                onValueChange = { vm.setEffectParam(spec.instanceId, param.key, it) }
+                            )
+                        }
+                        KeyframeDot(active = false) { vm.addEffectParamKeyframe(spec.instanceId, param.key) }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun IconAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = if (enabled) CutColors.TextSecondary else CutColors.TextTertiary.copy(alpha = 0.4f),
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun KeyframeDot(active: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            "◆",
+            fontSize = 11.sp,
+            color = if (active) CutColors.Accent else CutColors.TextTertiary
+        )
+    }
+}
+
+private fun formatParam(value: Float, unit: String): String = when (unit) {
+    "%" -> "${(value * 100).roundToInt()}%"
+    "px" -> "${value.roundToInt()} px"
+    "°" -> "${value.roundToInt()}°"
+    "x" -> "%.1fx".format(value)
+    else -> "%.2f".format(value)
 }
 
 @Composable

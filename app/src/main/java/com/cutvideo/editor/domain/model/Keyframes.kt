@@ -23,6 +23,8 @@ enum class KeyframeProperty(val label: String, val defaultValue: Float, val minV
     BLUR("Blur", 0f, 0f, 60f),
     GLOW("Glow", 0f, 0f, 1f),
     EFFECT_INTENSITY("Effect intensity", 0.5f, 0f, 1f),
+    /** Generic effect-parameter track: the target parameter is [KeyframeTrack.param]. */
+    EFFECT_PARAM("Effect parameter", 0.5f, -1000f, 1000f),
     CROP_LEFT("Crop left", 0f, 0f, 0.95f),
     CROP_RIGHT("Crop right", 0f, 0f, 0.95f),
     CROP_TOP("Crop top", 0f, 0f, 0.95f),
@@ -70,7 +72,14 @@ data class Keyframe(
 @Serializable
 data class KeyframeTrack(
     val property: KeyframeProperty,
-    val keyframes: List<Keyframe> = emptyList()
+    val keyframes: List<Keyframe> = emptyList(),
+    /**
+     * For effect tracks: the `EffectSpec.instanceId` this track animates. Empty targets the clip
+     * itself (transform, volume, …) or — for [KeyframeProperty.EFFECT_INTENSITY] — every effect.
+     */
+    val targetId: String = "",
+    /** For [KeyframeProperty.EFFECT_PARAM]: which parameter of the effect this track animates. */
+    val param: String = ""
 ) {
     val sorted: List<Keyframe> get() = keyframes.sortedBy { it.timeUs }
     val isEmpty: Boolean get() = keyframes.isEmpty()

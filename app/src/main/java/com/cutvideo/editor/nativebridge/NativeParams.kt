@@ -66,7 +66,14 @@ object NativeEffectIds {
         "tilt_shift" to 20,
         "old_film" to 21,
         "heat_wave" to 22,
-        "spotlight" to 23
+        "spotlight" to 23,
+        // --- professional engine effects (Phase 1) --------------------------------------------
+        "gaussian_blur" to 24,
+        "glow" to 25,
+        "bloom_pro" to 26,
+        "drop_shadow" to 27,
+        "vignette_pro" to 28,
+        "grain_pro" to 29
     )
 
     init {
@@ -81,9 +88,9 @@ object NativeEffectIds {
 
     fun idOf(effectId: String): Int = order[effectId] ?: 0
     fun of(clip: Clip): IntArray =
-        clip.effects.filter { it.intensity > 0f && it.id != "none" }.map { idOf(it.id) }.toIntArray()
+        clip.effects.filter { it.enabled && it.intensity > 0f && it.id != "none" }.map { idOf(it.id) }.toIntArray()
     fun strengths(clip: Clip): FloatArray =
-        clip.effects.filter { it.intensity > 0f && it.id != "none" }.map { it.intensity }.toFloatArray()
+        clip.effects.filter { it.enabled && it.intensity > 0f && it.id != "none" }.map { it.intensity }.toFloatArray()
 }
 
 object NativeParamWriter {

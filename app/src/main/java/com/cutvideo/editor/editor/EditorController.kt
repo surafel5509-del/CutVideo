@@ -258,7 +258,7 @@ class EditorController(
     }
 
     fun toggleEffect(clipId: String, effectId: String, intensity: Float = 0.5f) {
-        // Four simultaneous effects is the shader/native limit; say so instead of silently dropping.
+        // Legacy entry point (library screen): adds the effect, or removes the first instance of it.
         val clip = _doc.value?.clip(clipId)
         if (clip != null && clip.effects.none { it.id == effectId } && clip.effects.size >= MAX_EFFECTS) {
             _status.value = EditorStatus.Error("Up to $MAX_EFFECTS effects per clip — remove one first")
@@ -270,10 +270,113 @@ class EditorController(
                 val effects = if (existing != null) {
                     clip.effects - existing
                 } else {
-                    (clip.effects + EffectSpec(effectId, intensity)).take(MAX_EFFECTS)
+                    clip.effects + EffectSpec(effectId, intensity)
                 }
                 clip.copy(effects = effects)
             }
+        }
+    }
+
+    // --- effect chain commands (ordering, parameters, blending) ---------------------------------
+
+    /** Adds an effect at the end of the chain and returns its instance id. */
+    fun addEffect(clipId: String, effectId: String): String? {
+        val clip = _doc.value?.clip(clipId) ?: return null
+        if (clip.effects.size >= MAX_EFFECTS) {
+            _status.value = EditorStatus.Error("Up to $MAX_EFFECTS effects per clip — remove one first")
+            return null
+        }
+        val spec = EffectSpec(effectId, com.cutvideo.editor.domain.model.EffectCatalog.def(effectId).defaultIntensity)
+        mutate("Add effect") { doc ->
+            TimelineManager.updateClip(doc, clipId) { it.copy(effects = it.effects + spec) }
+        }
+        return spec.instanceId
+    }
+
+    fun removeEffect(clipId: String, instanceId: String) {
+        mutate("Remove effect") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(effects = clip.effects.filterNot { it.instanceId == instanceId })
+            }
+        }
+    }
+
+    /** Moves an effect up (−1) or down (+1) in the render order. */
+    fun moveEffect(clipId: String, instanceId: String, delta: Int) {
+        mutate("Reorder effects") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(effects = com.cutvideo.editor.editor.effects.EffectChain.moved(clip.effects, instanceId, delta))
+            }
+        }
+    }
+
+    fun duplicateEffect(clipId: String, instanceId: String) {
+        val clip = _doc.value?.clip(clipId) ?: return
+        if (clip.effects.size >= MAX_EFFECTS) {
+            _status.value = EditorStatus.Error("Up to $MAX_EFFECTS effects per clip — remove one first")
+            return
+        }
+        mutate("Duplicate effect") { doc ->
+            TimelineManager.updateClip(doc, clipId) { c ->
+                c.copy(effects = com.cutvideo.editor.editor.effects.EffectChain.duplicated(c.effects, instanceId))
+            }
+        }
+    }
+
+    fun toggleEffectEnabled(clipId: String, instanceId: String) {
+        mutate("Toggle effect") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(effects = com.cutvideo.editor.editor.effects.EffectChain.toggled(clip.effects, instanceId))
+            }
+        }
+    }
+
+    fun setEffectParam(clipId: String, instanceId: String, key: String, value: Float, live: Boolean = false) {
+        val update: (ProjectDoc) -> ProjectDoc = { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(
+                    effects = com.cutvideo.editor.editor.effects.EffectChain
+                        .withParam(clip.effects, instanceId, key, value)
+                )
+            }
+        }
+        if (live) mutateLive(update) else mutate("Set effect parameter", update)
+    }
+
+    fun setEffectIntensityById(clipId: String, instanceId: String, value: Float, live: Boolean = false) {
+        val update: (ProjectDoc) -> ProjectDoc = { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(
+                    effects = clip.effects.map {
+                        if (it.instanceId == instanceId) it.copy(intensity = value.coerceIn(0f, 1f)) else it
+                    }
+                )
+            }
+        }
+        if (live) mutateLive(update) else mutate("Set effect intensity", update)
+    }
+
+    fun setEffectBlend(clipId: String, instanceId: String, blend: com.cutvideo.editor.domain.model.BlendMode) {
+        mutate("Set blend mode") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                clip.copy(effects = clip.effects.map {
+                    if (it.instanceId == instanceId) it.copy(blend = blend) else it
+                })
+            }
+        }
+    }
+
+    /** Replaces the clip's chain with a named multi-effect preset stack. */
+    fun applyEffectStack(clipId: String, stackId: String) {
+        val stack = com.cutvideo.editor.domain.model.EffectCatalog.stacks.firstOrNull { it.id == stackId } ?: return
+        mutate("Apply effect preset") { doc ->
+            TimelineManager.updateClip(doc, clipId) { it.copy(effects = stack.effects) }
+        }
+    }
+
+    fun clearEffects(clipId: String) {
+        mutate("Clear effects") { doc ->
+            TimelineManager.updateClip(doc, clipId) { it.copy(effects = emptyList()) }
         }
     }
 
@@ -454,6 +557,64 @@ class EditorController(
                 val track = existing?.let { KeyframeEngine.withKeyframe(it, key) }
                     ?: com.cutvideo.editor.domain.model.KeyframeTrack(property, listOf(key))
                 clip.copy(keyframes = clip.keyframes.filterNot { it.property == property } + track)
+            }
+        }
+    }
+
+    /**
+     * Adds a keyframe on one effect's own parameter at the playhead. [param] targets that
+     * parameter; empty [param] targets the effect's intensity.
+     */
+    fun addEffectKeyframe(clipId: String, instanceId: String, param: String, timeUs: Long) {
+        mutate("Add effect keyframe") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val spec = clip.effects.firstOrNull { it.instanceId == instanceId } ?: return@updateClip clip
+                val property = if (param.isEmpty()) {
+                    com.cutvideo.editor.domain.model.KeyframeProperty.EFFECT_INTENSITY
+                } else {
+                    com.cutvideo.editor.domain.model.KeyframeProperty.EFFECT_PARAM
+                }
+                val base = if (param.isEmpty()) {
+                    spec.intensity
+                } else {
+                    spec.params[param] ?: com.cutvideo.editor.domain.model.EffectCatalog
+                        .def(spec.id).params.firstOrNull { it.key == param }?.default ?: 0f
+                }
+                val existing = clip.keyframes.firstOrNull {
+                    it.property == property && it.targetId == instanceId && it.param == param
+                }
+                val current = KeyframeEngine.evaluate(existing, timeUs, base)
+                val key = com.cutvideo.editor.domain.model.Keyframe(
+                    timeUs = timeUs.coerceIn(0L, clip.durationUs),
+                    value = current
+                )
+                val track = existing?.let { KeyframeEngine.withKeyframe(it, key) }
+                    ?: com.cutvideo.editor.domain.model.KeyframeTrack(property, listOf(key), instanceId, param)
+                clip.copy(
+                    keyframes = clip.keyframes.filterNot {
+                        it.property == property && it.targetId == instanceId && it.param == param
+                    } + track
+                )
+            }
+        }
+    }
+
+    fun deleteEffectKeyframe(clipId: String, instanceId: String, param: String, timeUs: Long) {
+        mutate("Delete effect keyframe") { doc ->
+            TimelineManager.updateClip(doc, clipId) { clip ->
+                val property = if (param.isEmpty()) {
+                    com.cutvideo.editor.domain.model.KeyframeProperty.EFFECT_INTENSITY
+                } else {
+                    com.cutvideo.editor.domain.model.KeyframeProperty.EFFECT_PARAM
+                }
+                val track = clip.keyframes.firstOrNull {
+                    it.property == property && it.targetId == instanceId && it.param == param
+                } ?: return@updateClip clip
+                val next = KeyframeEngine.withoutKeyframe(track, timeUs)
+                val remaining = clip.keyframes.filterNot {
+                    it.property == property && it.targetId == instanceId && it.param == param
+                }
+                clip.copy(keyframes = if (next.isEmpty) remaining else remaining + next)
             }
         }
     }
@@ -990,7 +1151,7 @@ class EditorController(
 
     private companion object {
         /** `uEffectIds[4]` in the shader and the native effect stack both hold four entries. */
-        const val MAX_EFFECTS = 4
+        const val MAX_EFFECTS = 12
 
         const val TAG = "EditorController"
     }

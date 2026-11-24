@@ -42,8 +42,8 @@ data class GlLook(
     val wipeMode: Int,
     val timeSeconds: Float,
     val aspect: Float,
-    val effectIds: IntArray,
-    val effectAmounts: FloatArray,
+    /** Ordered, time-resolved effect chain — rendered as passes after the look program. */
+    val chain: List<com.cutvideo.editor.editor.effects.EffectChain.ResolvedEffect> = emptyList(),
     /** Keyframed/animated transform baked for the shader (identity when the preview uses Compose). */
     val transformScale: Float = 1f,
     val transformRotation: Float = 0f,
@@ -74,9 +74,6 @@ data class GlMask(
 
 object GlLookFactory {
 
-    /** Maximum simultaneous GPU effects; extra entries are ignored by the shader (documented). */
-    const val MAX_GPU_EFFECTS = 4
-
     /** Masks the shader samples (uniform arrays are fixed at 2). */
     const val MAX_GPU_MASKS = 2
 
@@ -89,27 +86,24 @@ object GlLookFactory {
         // column vectors, so hand it the transposed 3x3 (i.e. column-major order for glUniformMatrix3fv).
         val columnMajor = floatArrayOf(m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8])
 
-        // Keyframed effect intensity scales every effect amount; keyframed glow injects a bloom.
-        val effectIntensityScale =
-            KeyframeEngine.valueOr(KeyframeProperty.EFFECT_INTENSITY, clip.keyframes, timelineUs) /
-                KeyframeProperty.EFFECT_INTENSITY.defaultValue.coerceAtLeast(0.001f)
+        // Keyframed glow injects a bloom pass; the filter preset's grain appends a grain pass.
         val glow = KeyframeEngine.valueOr(KeyframeProperty.GLOW, clip.keyframes, timelineUs)
 
-        val effectIds = ArrayList<Int>(MAX_GPU_EFFECTS)
-        val effectAmounts = ArrayList<Float>(MAX_GPU_EFFECTS)
-        clip.effects.forEach { effect ->
-            if (effect.intensity > 0f && effect.id != "none" && effectIds.size < MAX_GPU_EFFECTS) {
-                effectIds += NativeEffectIds.idOf(effect.id)
-                effectAmounts += (effect.intensity * effectIntensityScale).coerceIn(0f, 1f)
-            }
+        // The chain is resolved ONCE here — preview and export both draw exactly this list.
+        val chain = ArrayList<com.cutvideo.editor.editor.effects.EffectChain.ResolvedEffect>(clip.effects.size + 2)
+        clip.effects.forEach { spec ->
+            com.cutvideo.editor.editor.effects.EffectChain.resolveOne(spec, clip.keyframes, timelineUs)
+                ?.let { chain += it }
         }
-        if (preset.grain > 0f && intensity > 0f && effectIds.size < MAX_GPU_EFFECTS) {
-            effectIds += NativeEffectIds.idOf("grain")
-            effectAmounts += (preset.grain * intensity).coerceIn(0f, 1f)
+        if (preset.grain > 0f && intensity > 0f) {
+            val spec = com.cutvideo.editor.domain.model.EffectSpec("grain", (preset.grain * intensity).coerceIn(0f, 1f))
+            com.cutvideo.editor.editor.effects.EffectChain.resolveOne(spec, clip.keyframes, timelineUs)
+                ?.let { chain += it }
         }
-        if (glow > 0.002f && effectIds.size < MAX_GPU_EFFECTS) {
-            effectIds += NativeEffectIds.idOf("bloom")
-            effectAmounts += glow.coerceIn(0f, 1f)
+        if (glow > 0.002f) {
+            val spec = com.cutvideo.editor.domain.model.EffectSpec("bloom", glow.coerceIn(0f, 1f))
+            com.cutvideo.editor.editor.effects.EffectChain.resolveOne(spec, clip.keyframes, timelineUs)
+                ?.let { chain += it }
         }
 
         val key = clip.chroma.keyColor
@@ -149,8 +143,7 @@ object GlLookFactory {
             ) 1 else 0,
             timeSeconds = timelineUs / 1_000_000f,
             aspect = aspect.ratio,
-            effectIds = effectIds.toIntArray(),
-            effectAmounts = effectAmounts.toFloatArray(),
+            chain = chain,
             transformScale = animation?.scale ?: 1f,
             transformRotation = animation?.rotationDegrees ?: 0f,
             transformOffsetX = animation?.translateX ?: 0f,

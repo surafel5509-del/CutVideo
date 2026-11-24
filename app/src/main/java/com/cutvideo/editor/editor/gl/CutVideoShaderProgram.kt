@@ -140,9 +140,6 @@ internal class CutVideoShaderProgram {
         uniform1i("uWipeMode", look.wipeMode)
         uniform1f("uTime", look.timeSeconds)
         uniform1f("uAspect", look.aspect)
-        uniform3f("uDuotoneShadow", 0.06f, 0.09f, 0.16f)
-        uniform3f("uDuotoneHighlight", 0.96f, 0.83f, 1.0f)
-        setEffects(look.effectIds, look.effectAmounts)
         setTransform(look)
         setMasks(look)
     }
@@ -252,19 +249,6 @@ internal class CutVideoShaderProgram {
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glDisableVertexAttribArray(blitProgramPosition)
         if (blitProgramTexCoord >= 0) GLES20.glDisableVertexAttribArray(blitProgramTexCoord)
-    }
-
-    private fun setEffects(ids: IntArray, amounts: FloatArray) {
-        val idArray = IntArray(4)
-        val amountArray = FloatArray(4)
-        for (i in 0 until minOf(4, ids.size)) {
-            idArray[i] = ids[i]
-            amountArray[i] = amounts.getOrElse(i) { 0f }
-        }
-        val idLocation = uniform("uEffectIds[0]")
-        if (idLocation >= 0) GLES20.glUniform1iv(idLocation, 4, idArray, 0)
-        val amountLocation = uniform("uEffectAmounts[0]")
-        if (amountLocation >= 0) GLES20.glUniform1fv(amountLocation, 4, amountArray, 0)
     }
 
     fun draw(inputTextureId: Int) {

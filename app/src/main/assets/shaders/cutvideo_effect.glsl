@@ -55,12 +55,8 @@ uniform vec2 uMaskExtras[2];        // roundness, invert
 uniform int uMaskFreehandIndex;     // which mask samples uMaskTexture, -1 when none
 uniform sampler2D uMaskTexture;
 
-// Up to four simultaneous effects, in panel order.
-uniform int uEffectIds[4];
-uniform float uEffectAmounts[4];
-
-uniform vec3 uDuotoneShadow;
-uniform vec3 uDuotoneHighlight;
+// Effects are applied by the ordered effect-chain passes (`cutvideo_pass.glsl`), not inline here:
+// this shader owns colour grading, masks, keyframed transform and wipes only.
 
 const float PI = 3.14159265359;
 
@@ -202,143 +198,6 @@ vec3 blur9(vec2 uv, float radiusPx) {
     return acc / 9.0;
 }
 
-vec3 applyOneEffect(vec3 color, vec2 uv, int id, float amount) {
-    if (amount <= 0.001) return color;
-
-    if (id == 1) {           // film grain
-        float n = hash21(uv * 1024.0 + vec2(floor(uTime * 24.0) * 7.13));
-        return clamp(color + (n - 0.5) * 2.0 * amount * 0.18, 0.0, 1.0);
-    } else if (id == 2) {    // vignette
-        vec2 p = (uv - 0.5) * vec2(uAspect, 1.0);
-        float r = clamp(length(p) / 0.72, 0.0, 1.0);
-        float f = 1.0 - amount * smoothstep(0.35, 1.0, r);
-        return color * f;
-    } else if (id == 3) {    // scanlines
-        float line = mod(floor(uv.y * 480.0), 3.0);
-        float f = line < 1.0 ? 1.0 - 0.35 * amount : 1.0;
-        return vec3(color.r * f, color.g * f * (1.0 + 0.05 * amount), color.b * f);
-    } else if (id == 4) {    // glitch
-        float band = floor(uv.y * 40.0);
-        float rnd = hash11(band * 0.37 + floor(uTime * 9.0) * 1.7);
-        vec2 shift = vec2((rnd > 0.82 ? (rnd - 0.82) * 4.0 * amount : 0.0), 0.0);
-        float ca = amount * 0.006;
-        vec3 c;
-        c.r = sampleRgb(uv + shift + vec2(ca, 0.0)).r;
-        c.g = sampleRgb(uv + shift).g;
-        c.b = sampleRgb(uv + shift - vec2(ca, 0.0)).b;
-        return c;
-    } else if (id == 5) {    // chromatic aberration
-        float ca = amount * 0.004;
-        vec3 c;
-        c.r = sampleRgb(uv + vec2(ca, 0.0)).r;
-        c.g = color.g;
-        c.b = sampleRgb(uv - vec2(ca, 0.0)).b;
-        return c;
-    } else if (id == 6) {    // bloom
-        vec3 glow = blur9(uv, 6.0 + 10.0 * amount);
-        glow = max(glow - 0.55, 0.0) * 2.2;
-        return clamp(color + glow * amount * 1.1, 0.0, 1.0);
-    } else if (id == 7) {    // light leak
-        float cx = 0.15 + 0.7 * (0.5 + 0.5 * sin(uTime * 0.6));
-        float cy = 0.85 - 0.2 * sin(uTime * 0.43);
-        vec2 d = vec2((uv.x - cx) * uAspect, uv.y - cy);
-        float leak = (1.0 - smoothstep(0.0, 0.9, length(d))) * amount * 0.85;
-        return clamp(color + vec3(0.95, 0.55, 0.18) * leak, 0.0, 1.0);
-    } else if (id == 8) {    // pulse
-        float amp = 1.0 + 0.12 * amount * sin(uTime * 6.0);
-        return color * amp;
-    } else if (id == 9) {    // mirror
-        vec2 muv = vec2(uv.x < 0.5 ? uv.x : 1.0 - uv.x, uv.y);
-        return mix(color, sampleRgb(muv), amount);
-    } else if (id == 10) {   // posterize
-        float levels = max(2.0, 2.0 + (1.0 - amount) * 10.0);
-        return floor(color * levels) / (levels - 1.0);
-    } else if (id == 11) {   // duotone
-        float l = luma(color);
-        vec3 duo = mix(uDuotoneShadow, uDuotoneHighlight, l);
-        return mix(color, duo, amount);
-    } else if (id == 12) {   // sharpen
-        vec3 blur = blur9(uv, 2.0);
-        return clamp(color + (color - blur) * amount * 1.4, 0.0, 1.0);
-    } else if (id == 13) {   // vhs
-        float jitter = (hash11(floor(uv.y * 240.0) * 0.21 + floor(uTime * 12.0)) - 0.5) * 0.004 * amount;
-        vec3 c = sampleRgb(uv + vec2(jitter, 0.0));
-        if (mod(floor(uv.y * 480.0), 2.0) < 1.0) c *= 1.0 - 0.18 * amount;
-        float n = hash21(uv * 900.0 + uTime);
-        c += (n - 0.5) * 0.10 * amount;
-        return mix(c, vec3(luma(c)), 0.25 * amount);
-    } else if (id == 14) {   // snow
-        float cells = 260.0;
-        vec2 g = floor(uv * cells);
-        float n = hash21(g);
-        float fall = fract(hash21(g + 3.7) + uTime * (0.15 + n * 0.4));
-        float dotSize = smoothstep(0.30, 0.0, length(fract(uv * cells) - 0.5));
-        float visible = step(0.62 - amount * 0.35, hash21(g * 1.7));
-        float snow = dotSize * visible * step(0.02, abs(uv.y - fall) + 0.02);
-        return mix(color, vec3(1.0), clamp(snow * (0.35 + 0.5 * amount), 0.0, 1.0));
-    } else if (id == 15) {   // zoom blur
-        vec3 acc = vec3(0.0);
-        for (int i = 0; i < 6; ++i) {
-            float s = 1.0 - 0.06 * amount * (float(i) / 5.0);
-            acc += sampleRgb((uv - 0.5) * s + 0.5);
-        }
-        return mix(color, acc / 6.0, 0.85);
-    } else if (id == 16) {   // blur
-        return blur9(uv, 3.0 + 24.0 * amount);
-    } else if (id == 17) {   // pixelate
-        float cells = 22.0 + (1.0 - amount) * 170.0;
-        vec2 snapped = (floor(uv * cells) + 0.5) / cells;
-        return sampleRgb(snapped);
-    } else if (id == 18) {   // neon edge glow
-        float lx = luma(sampleRgb(uv + vec2(uTexelSize.x * 2.0, 0.0))) -
-                   luma(sampleRgb(uv - vec2(uTexelSize.x * 2.0, 0.0)));
-        float ly = luma(sampleRgb(uv + vec2(0.0, uTexelSize.y * 2.0))) -
-                   luma(sampleRgb(uv - vec2(0.0, uTexelSize.y * 2.0)));
-        float edge = clamp(length(vec2(lx, ly)) * 3.0, 0.0, 1.0);
-        vec3 tint = mix(vec3(0.15, 0.95, 1.0), vec3(1.0, 0.25, 0.85),
-                        0.5 + 0.5 * sin(uv.y * 3.2 + uTime * 0.8));
-        return clamp(color * (1.0 - 0.45 * amount) + tint * edge * amount * 1.6, 0.0, 1.0);
-    } else if (id == 19) {   // halftone print
-        vec2 px = uv / max(uTexelSize, vec2(1e-6));
-        float cellPx = 7.0 - 2.0 * amount;
-        vec2 f = fract(px / cellPx) - 0.5;
-        float d = length(f);
-        float l = luma(color);
-        float radius = 0.5 * sqrt(max(0.0, 1.0 - l));
-        float ink = 1.0 - smoothstep(radius - 0.05, radius + 0.05, d);
-        float v = mix(0.94 - 0.08 * l, 0.05, ink);
-        return mix(color, vec3(v * 1.04, v, v * 0.93), amount);
-    } else if (id == 20) {   // tilt shift
-        float ny = abs(uv.y - 0.5) * 2.0;
-        float strength = smoothstep(0.12, 0.8, ny) * amount;
-        return strength > 0.01 ? blur9(uv, strength * 30.0) : color;
-    } else if (id == 21) {   // old film
-        vec3 sepia = vec3(0.393 * color.r + 0.769 * color.g + 0.189 * color.b,
-                          0.349 * color.r + 0.686 * color.g + 0.168 * color.b,
-                          0.272 * color.r + 0.534 * color.g + 0.131 * color.b);
-        float flick = 1.0 + 0.05 * sin(uTime * 9.0) + 0.04 * (hash11(floor(uTime * 12.0)) - 0.5);
-        vec2 p = (uv - 0.5) * vec2(uAspect, 1.0);
-        float vig = 1.0 - amount * 0.65 * smoothstep(0.15, 0.85, length(p));
-        vec2 px = uv / max(uTexelSize, vec2(1e-6));
-        float scratch = step(0.9965, hash21(vec2(floor(px.x * 0.5), floor(uTime * 8.0))));
-        vec3 c = mix(color, sepia, amount) * flick * vig;
-        return mix(c, vec3(0.96), scratch * amount * 0.35);
-    } else if (id == 22) {   // heat wave
-        vec2 px = uv / max(uTexelSize, vec2(1e-6));
-        float shift = (sin(px.y * 0.09 + uTime * 3.1) * 7.0 + sin(px.y * 0.31 - uTime * 1.7) * 3.0) * amount;
-        return sampleRgb(uv + vec2(shift * uTexelSize.x, 0.0));
-    } else if (id == 23) {   // spotlight
-        vec2 p = (uv - vec2(0.5, 0.42)) * vec2(uAspect, 1.0);
-        float r = length(p) / 0.62;
-        float light = 1.0 - smoothstep(0.1, 1.0, r);
-        float gain = mix(1.0 - 0.8 * amount, 1.0 + 0.25 * amount, light);
-        return clamp(color * gain * vec3(1.0 + 0.06 * amount * light,
-                                         1.0 + 0.02 * amount * light,
-                                         1.0 - 0.04 * amount * light), 0.0, 1.0);
-    }
-    return color;
-}
-
 void main() {
     vec2 uv = transformUv(vTex);
     float bounds = uvInBounds(uv);
@@ -352,9 +211,7 @@ void main() {
 
     color = applyColor(color);
 
-    for (int i = 0; i < 4; ++i) {
-        color = applyOneEffect(color, uv, uEffectIds[i], uEffectAmounts[i]);
-    }
+    // Effects render as ordered chain passes (cutvideo_pass.glsl) after this program.
 
     if (uSharpen > 0.001) {
         vec3 blur = blur9(uv, 2.0);

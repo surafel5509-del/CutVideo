@@ -255,7 +255,8 @@ fun EffectCard(
     preview: Bitmap?,
     applied: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    previewAvailable: Boolean = true
 ) {
     SelectableSwatch(
         selected = applied,
@@ -276,6 +277,18 @@ fun EffectCard(
                         contentDescription = preset.name,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
+                    )
+                } else if (!previewAvailable) {
+                    // No raster preview for this effect kind (it renders only in the live chain):
+                    // show the palette accent instead of a perpetual loading shimmer.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(preset.accent.copy(alpha = 0.55f), preset.accent.copy(alpha = 0.2f))
+                                )
+                            )
                     )
                 } else {
                     ShimmerBox(modifier = Modifier.fillMaxSize(), corner = 0.dp)

@@ -43,13 +43,19 @@ private class CutVideoGlShaderProgram(
 ) : BaseGlShaderProgram(useHdr, 1) {
 
     private val program = CutVideoShaderProgram()
+    private val chainRenderer = EffectChainRenderer(program)
+    private var outputWidth = 0
+    private var outputHeight = 0
 
     init {
         program.init(context.applicationContext)
+        chainRenderer.init(context.applicationContext)
     }
 
     override fun configure(inputWidth: Int, inputHeight: Int): Size {
         program.setTexelSize(inputWidth, inputHeight)
+        outputWidth = inputWidth
+        outputHeight = inputHeight
         return Size(inputWidth, inputHeight)
     }
 
@@ -57,12 +63,12 @@ private class CutVideoGlShaderProgram(
         val clip = clipProvider()
         val localUs = localTimeProvider(presentationTimeUs)
         val animation = if (applyAnimation) AnimationEngine.composeLocal(clip, localUs) else null
-        program.use()
-        program.setLook(GlLookFactory.from(clip, aspect, localUs, animation))
-        program.draw(inputTexId)
+        val look = GlLookFactory.from(clip, aspect, localUs, animation)
+        chainRenderer.drawFrame(inputTexId, look, outputWidth, outputHeight)
     }
 
     override fun release() {
+        chainRenderer.release()
         program.release()
         super.release()
     }
